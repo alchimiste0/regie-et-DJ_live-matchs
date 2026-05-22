@@ -127,8 +127,8 @@ function fetchRolskanetData() { const input = document.getElementById("rolskanet
 // ==========================================
 
 const SPOTIFY_CLIENT_ID = "5bc17dabfc0945b7b6ba5ee2989a25f1"; 
-const IS_LOCALHOST = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
-const SPOTIFY_REDIRECT_URI = IS_LOCALHOST ? "http://127.0.0.1:5500/index.html" : "https://alchimiste0.github.io/index.html";
+// S'adapte automatiquement à l'adresse exacte où tu te trouves (en local ou sur GitHub Pages)
+const SPOTIFY_REDIRECT_URI = window.location.origin + window.location.pathname;
 const SPOTIFY_SCOPES = ["user-modify-playback-state", "user-read-playback-state", "playlist-read-private", "playlist-read-collaborative"];
 
 let spotifyPlaylists = []; let spotifyPlaylistsMap = {}; 
