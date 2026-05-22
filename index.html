@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Score Manager & DJ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- BOUTONS FIXES EN HAUT -->
+  <div id="controls">
+    <button onclick="resizeBoxes(-10)">Réduire</button>
+    <button onclick="resizeBoxes(10)">Agrandir</button>
+    <button onclick="toggleLayout()">Disposition</button>
+    <button id="invertBtn" onclick="invertTimerDirection()">Mode: Chrono</button>
+  </div>
+
+  <!-- CONTENEUR GLOBAL POUR LE SPLIT SCREEN -->
+  <div id="app-wrapper">
+    
+    <!-- MOITIÉ GAUCHE : CONTROLEUR (Scroll indépendant) -->
+    <div id="score-manager-side">
+      <div id="main-dashboard">
+          
+        <!-- ZONE ROLSKANET -->
+        <div id="rolskanet-control" class="zone rolskanet-zone" style="width: 100%;">
+          <h2 style="margin-bottom: 15px;">🌐 Importation Rolskanet</h2>
+          <div style="display: flex; justify-content: center; margin-bottom: 15px;">
+            <button class="blue-btn" style="font-size: 16px; padding: 10px 20px; background-color: #007bff;" onclick="openAllRolskanetPages()">🌍 Ouvrir les 3 onglets Rolskanet</button>
+          </div>
+          <div style="display: flex; gap: 10px; justify-content: center; align-items: center;">
+            <textarea id="rolskanetId" placeholder="Collez le code JSON du favori ici..." style="width: 400px; height: 50px; padding: 8px; border-radius: 4px; border: none; resize: vertical; font-family: sans-serif;"></textarea>
+            <button class="action-btn" style="width: auto; padding: 10px 15px; font-size: 14px;" onclick="fetchRolskanetData()">⬇️ Mettre à jour OBS</button>
+          </div>
+          <div id="rolskanet-status" style="font-size: 13px; color: #aaa; margin-top: 5px;">En attente de code JSON...</div>
+        </div>
+
+        <!-- ZONE SCORE DOMICILE -->
+        <div id="score-b-control" class="zone">
+          <input type="text" id="domName" class="team-name-input" value="DOMICILE" onchange="updateTeamName('B', this.value)">
+          <div class="controls">
+            <button onclick="directChangeScore('B', -1)">−</button>
+            <span id="scoreB">0</span>
+            <button onclick="promptGoal('B')">+</button>
+          </div>
+          <div class="penalty-section">
+            <h3>Pénalités</h3>
+            <div class="penalty-buttons">
+              <button onclick="promptPenalty('B', 2)">2 min</button>
+              <button onclick="promptPenalty('B', 5)">5 min</button>
+              <button onclick="promptPenalty('B', 10)">10 min</button>
+            </div>
+            <div class="penalty-timers" id="penaltiesB"></div>
+          </div>
+        </div>
+        
+        <!-- ZONE SCORE VISITEUR -->
+        <div id="score-a-control" class="zone">
+          <input type="text" id="visName" class="team-name-input" value="VISITEUR" onchange="updateTeamName('A', this.value)">
+          <div class="controls">
+            <button onclick="directChangeScore('A', -1)">−</button>
+            <span id="scoreA">0</span>
+            <button onclick="promptGoal('A')">+</button>
+          </div>
+          <div class="penalty-section">
+            <h3>Pénalités</h3>
+            <div class="penalty-buttons">
+              <button onclick="promptPenalty('A', 2)">2 min</button>
+              <button onclick="promptPenalty('A', 5)">5 min</button>
+              <button onclick="promptPenalty('A', 10)">10 min</button>
+            </div>
+            <div class="penalty-timers" id="penaltiesA"></div>
+          </div>
+        </div>
+
+        <!-- ZONE TEMPS (Lancement Rapide Spotify + Info Lecture) -->
+        <div id="timer-control" class="zone">
+          <h2>Temps</h2>
+          <div id="timer-inputs">
+            <input type="number" id="timerMinutes" value="0" min="0" max="99" oninput="manualSetTime()">
+            <span>:</span>
+            <input type="number" id="timerSeconds" value="0" min="0" max="59" oninput="manualSetTime()">
+          </div>
+          <div class="adjust-buttons">
+            <button onclick="adjustTimer(-60)">-1m</button>
+            <button onclick="adjustTimer(-1)">-1s</button>
+            <button onclick="adjustTimer(1)">+1s</button>
+            <button onclick="adjustTimer(60)">+1m</button>
+          </div>
+          <div id="max-time-display">
+            <span>Départ :</span>
+            <input type="number" id="maxMinutes" value="20" min="0" max="99">
+            <span>:</span>
+            <input type="number" id="maxSeconds" value="0" min="0" max="59">
+          </div>
+          <div id="timer-buttons">
+            <button id="playPauseBtn" onclick="toggleTimer()" class="start-btn">▶</button>
+            <button onclick="resetTimer()" class="reset-btn">⟳</button>
+            <button onclick="promptTimeout()" class="timeout-btn" title="Temps Mort">⏸️ TM</button>
+          </div>
+
+          <!-- Lancement Rapide Spotify -->
+          <div class="quick-launch-section">
+            <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #1DB954;">🎵 Lancement Rapide</h3>
+            <div id="quick-launch-container" class="quick-launch-grid"></div>
+            
+            <!-- MUSIQUE EN COURS (Toujours visible pendant le match) -->
+            <div id="controller-now-playing" style="font-size: 13px; margin-top: 12px; display: none;">
+              ▶️ <span id="controller-np-track" style="color: #1DB954; font-weight: bold;"></span> 
+              <span id="controller-np-playlist" style="color: #aaa; font-style: italic;"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ZONE PÉRIODES -->
+        <div id="period-control" class="zone">
+          <h2>Périodes</h2>
+          <div class="grid-3col">
+            <button class="blue-btn" onclick="setPeriod(0)">Échauffement</button>
+            <button class="blue-btn" onclick="setPeriod(1)">Période 1</button>
+            <button class="blue-btn" onclick="setPeriod(2)">Mi-temps</button>
+            <button class="blue-btn" onclick="setPeriod(3)">Période 2</button>
+            <button class="blue-btn" onclick="setPeriod(4)">Prolongation</button>
+            <button class="blue-btn" onclick="setPeriod(5)">Tirs au but</button>
+          </div>
+          <div style="margin-top: 5px; font-size: 14px; color:#aaa;">En cours : <span id="periodDisplay" style="color:white; font-weight:bold;">Échauffement</span></div>
+        </div>
+
+        <!-- ZONE SCÈNES OBS -->
+        <div id="scene-control" class="zone">
+          <h2>Scènes</h2>
+          <div class="grid-2col">
+            <button class="blue-btn" onclick="switchScene(sourceNames.sceneName)">Live</button>
+            <button class="blue-btn" onclick="switchScene(sourceNames.compoScene)">Composition</button>
+            <button class="blue-btn" onclick="handleMiTempsClick()">Mi-temps</button>
+            <button class="blue-btn" onclick="handleFinMatchClick()">Fin de match</button>
+          </div>
+        </div>
+
+        <!-- ZONE AFFICHAGE GRAPHICS -->
+        <div id="graphic-control" class="zone">
+          <h2>Affichage (5 sec)</h2>
+          <div class="grid-2col">
+            <button class="blue-btn" onclick="triggerGraphic(sourceNames.overlayReseaux)">Réseaux</button>
+            <button class="blue-btn" onclick="triggerGraphic(sourceNames.overlayClassement)">TOP 5 Classement</button>
+            <button class="blue-btn" onclick="triggerGraphic(sourceNames.overlayPointeurs)">TOP 5 Pointeurs</button>
+            <button class="blue-btn" onclick="triggerGraphic(sourceNames.overlayAutresScores)">Matchs en direct</button>
+          </div>
+        </div>
+
+        <!-- ZONE REPLAY -->
+        <div id="replay-control" class="zone replay-zone">
+          <h2>Régie Replay</h2>
+          <button id="toggleReplayBtn" class="start-btn" onclick="toggleReplayBuffer()">▶️ Activer le Replay Buffer</button>
+          <div id="replay-content" class="replay-content-hidden">
+            <button id="saveReplayBtn" class="action-btn" onclick="saveReplay()">📸 Capturer l'action !</button>
+            <div class="replay-status">Vidéos prêtes : <span id="replayCount" class="badge">0</span></div>
+            <div class="replay-buttons-grid">
+              <button class="play-btn" onclick="playLastReplay()">⏪ Revoir le dernier</button>
+              <button class="play-all-btn" onclick="playAllReplays()">🎞️ Revoir tout</button>
+              <button class="stop-btn" onclick="hideReplayOnStream()">❌ Forcer l'arrêt</button>
+              <button id="deleteBtn" class="delete-btn" onclick="clearReplays()">🗑️ Vider la liste</button>
+            </div>
+            <div style="margin-top: 10px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;">
+              <label style="cursor: pointer; font-size: 15px; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <input type="checkbox" id="loopReplaysCheckbox" style="width: 18px; height: 18px; cursor: pointer;"> 🔁 Boucler "Revoir tout"
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- ZONE SPOTIFY CONFIGURATION (REPLIABLE) -->
+        <div id="spotify-control" class="zone spotify-zone">
+          
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            
+            <h2 style="color: #1DB954; margin: 0; font-size: 18px; flex: 1; text-align: left; white-space: nowrap;">🎵 Config DJ</h2>
+            
+            <!-- BOUTON RECTANGULAIRE DE REPLI AU MILIEU -->
+            <button onclick="toggleSpotifyConfig()" class="fold-config-btn">
+              Paramètres <span id="spotify-config-chevron" style="color: #1DB954;">▲</span>
+            </button>
+            
+            <!-- BOUTON ACTIVATION WEB APP -->
+            <div style="flex: 1; text-align: right;">
+              <button onclick="toggleSpotifyWebApp()" style="background-color: #1DB954; color: black; font-weight: bold; border: none; padding: 6px 12px; border-radius: 15px; font-size: 12px; cursor: pointer; transition: 0.2s; white-space: nowrap;">
+                💻 Web App
+              </button>
+            </div>
+
+          </div>
+          
+          <div id="spotify-config-content" style="display: block; margin-top: 15px;">
+            <div id="spotify-login-state">
+              <button class="action-btn" style="background-color: #1DB954; color: white; border-radius: 50px;" onclick="redirectToAuthCodeFlow()">Se connecter à Spotify</button>
+            </div>
+            
+            <div id="spotify-connected-state" style="display: none;">
+              <div class="controls" style="margin-bottom: 15px;">
+                <button style="background: #282828; color: white; border-radius: 50%; width: 40px; height: 40px; padding: 0;" onclick="fetchSpotifyApi('me/player/previous', 'POST')">⏮</button>
+                <button style="background: #1DB954; color: black; border-radius: 20px;" onclick="toggleSpotifyPlayPause()">⏯ Pause / Play</button>
+                <button style="background: #282828; color: white; border-radius: 50%; width: 40px; height: 40px; padding: 0;" onclick="fetchSpotifyApi('me/player/next', 'POST')">⏭</button>
+              </div>
+
+              <div class="spotify-mappings">
+                <div class="mapping-row"><span>But :</span><select id="map-goal" onchange="saveSpotifyMap('goal', this.value)"></select></div>
+                <div class="mapping-row"><span>Pénalité :</span><select id="map-penalty" onchange="saveSpotifyMap('penalty', this.value)"></select></div>
+                <div class="mapping-row"><span>Reprise MT :</span><select id="map-reprise" onchange="saveSpotifyMap('reprise', this.value)"></select></div>
+                <div class="mapping-row"><span>Lancement :</span><select id="map-lancement" onchange="saveSpotifyMap('lancement', this.value)"></select></div>
+                <hr style="border-color: #444; margin: 10px 0;">
+                <div id="custom-mappings-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                <button onclick="addCustomMapping()" style="background: #333; color: white; width: 100%; border: 1px dashed #1DB954; margin-top: 10px;">+ Ajouter un son personnalisé</button>
+              </div>
+              
+              <div id="spotify-status" style="font-size: 13px; color: #ffeb3b; margin-top: 10px;"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div> <!-- FIN score-manager-side -->
+
+    <!-- MOITIÉ DROITE : SPOTIFY WEB APP COMPLET (Scroll indépendant) -->
+    <div id="spotify-webapp-side">
+      <header id="webapp-header">
+        <div id="header-left">
+          <div class="dropdown">
+              <button class="menubtn">Paramètres</button>
+              <div id="settings-menu" class="dropdown-content"></div>
+          </div>
+          <div class="dropdown">
+              <button class="menubtn">Filtre</button>
+              <div id="filter-menu" class="dropdown-content"></div>
+          </div>
+        </div>
+        <div id="header-center">
+            <h2 style="color:white; margin:0; font-size: 20px;">Spotify Web App</h2>
+        </div>
+        <div id="header-right"></div>
+      </header>
+
+      <main id="webapp-main">
+        <div id="webapp-left-pane">
+          <div id="webapp-playlists-grid"></div>
+        </div>
+        <div id="webapp-right-pane">
+          <div id="webapp-tracks-container">
+            <p style="color: #b3b3b3; text-align: center; margin-top: 50px;">Cliquez sur une playlist pour voir ses pistes.</p>
+          </div>
+        </div>
+      </main>
+
+      <footer id="webapp-footer">
+        <div id="webapp-now-playing">
+          <img id="webapp-np-img" src="https://placehold.co/56" />
+          <div id="webapp-np-info">
+            <span id="webapp-np-title"></span>
+            <span id="webapp-np-artist"></span>
+          </div>
+        </div>
+        <div id="webapp-player-controls">
+          <div id="webapp-player-buttons">
+            <button onclick="fetchSpotifyApi('me/player/previous', 'POST')">⏮</button>
+            <button id="webapp-play-pause-btn" onclick="toggleSpotifyPlayPause()">▶</button>
+            <button onclick="fetchSpotifyApi('me/player/next', 'POST')">⏭</button>
+          </div>
+          <div id="webapp-progress-bar-container">
+            <span id="webapp-current-time" class="time-label">0:00</span>
+            <input type="range" id="webapp-progress-bar" value="0" max="100" style="pointer-events: none;">
+            <span id="webapp-total-time" class="time-label">0:00</span>
+          </div>
+        </div>
+        <!-- Contrôles volume et appareils -->
+        <div id="webapp-right-controls">
+          <button id="devices-button">💻</button>
+          <input type="range" id="volume-slider" value="100" max="100" class="volume-slider">
+        </div>
+      </footer>
+    </div> <!-- FIN spotify-webapp-side -->
+
+  </div> <!-- FIN app-wrapper -->
+
+  <!-- FENÊTRES MODALES -->
+  <div id="player-modal" class="modal">
+    <div class="modal-content">
+      <h3 id="modal-title">Sélectionnez le joueur</h3>
+      <div id="player-grid" class="player-grid"></div>
+      <button class="modal-close-btn" onclick="closePlayerModal()">Annuler</button>
+    </div>
+  </div>
+
+  <div id="pool-modal" class="modal">
+    <div class="modal-content">
+      <h3 id="pool-modal-title">Sélectionnez :</h3>
+      <div id="pool-grid" class="player-grid"></div>
+      <button class="modal-close-btn" style="margin-top:15px;" onclick="closePoolModal()">Annuler</button>
+    </div>
+  </div>
+
+  <div id="spotify-extra-modal" class="modal">
+    <div class="modal-content" style="max-width: 600px; background: #191414; border-color: #1DB954;">
+      <h3 style="color: #1DB954;">🎵 Autres Sons</h3>
+      <div id="spotify-extra-grid" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; margin-bottom: 20px;"></div>
+      <button class="modal-close-btn" onclick="closeSpotifyExtraModal()">Fermer</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,299 @@
+/* CONFIGURATION GLOBALE */
+body {
+  background: #222;
+  color: white;
+  font-family: sans-serif;
+  margin: 0;
+  padding: 10px;
+  height: 100vh;
+  overflow: hidden; 
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* BOUTONS FIXES EN HAUT */
+#controls { 
+  display: flex; 
+  align-items: center; 
+  justify-content: center;
+  gap: 10px; 
+  flex-direction: column; /* Vertical par défaut (Mode 1) */
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+/* Aligné horizontalement en Mode 2 */
+body.horizontal-layout #controls { 
+  flex-direction: row; 
+}
+
+/* LAYOUT GLOBAL (SPLIT SCREEN) */
+#app-wrapper {
+  display: flex;
+  width: 100%;
+  flex: 1;
+  gap: 20px;
+  align-items: flex-start;
+  overflow: hidden;
+  min-height: 0; 
+}
+
+/* SCROLLING INDÉPENDANT DES DEUX CÔTÉS */
+#score-manager-side {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto; 
+  transition: width 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-right: 5px; 
+}
+#score-manager-side.split-active { width: 50%; }
+
+#spotify-webapp-side {
+  display: none; 
+  flex-direction: column;
+  background-color: #121212;
+  border-radius: 10px;
+  border: 2px solid #1DB954;
+  height: 100%;
+  width: 50%;
+  overflow-y: auto;
+}
+#spotify-webapp-side.active { display: flex; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #222; border-radius: 4px;}
+::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #1DB954; }
+
+#main-dashboard {
+  display: flex;
+  flex-direction: column; 
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  transition: all 0.3s ease-in-out;
+}
+
+/* Optimisation Disposition Horizontale */
+body.horizontal-layout #main-dashboard {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-areas:
+    "rolskanet rolskanet rolskanet"
+    "timer period scenes"
+    "scoreB graphics scoreA"
+    "replay replay replay"
+    "spotify spotify spotify";
+  gap: 15px; 
+  align-items: start;
+}
+body.horizontal-layout .zone { padding: 15px 25px; }
+
+#rolskanet-control { grid-area: rolskanet; }
+#timer-control { grid-area: timer; }
+#period-control { grid-area: period; }
+#scene-control { grid-area: scenes; }
+#graphic-control { grid-area: graphics; }
+#replay-control { grid-area: replay; }
+#score-b-control { grid-area: scoreB; }
+#score-a-control { grid-area: scoreA; }
+#spotify-control { grid-area: spotify; }
+
+.zone {
+  background: #333;
+  padding: 20px 40px;
+  border-radius: 10px;
+  text-align: center;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: padding 0.2s ease-in-out;
+  position: relative;
+  width: 100%;
+}
+
+.replay-zone { background: #2b3a4a; border: 2px solid #4a90e2; }
+.rolskanet-zone { background: #2f2a1a; border: 2px solid #e2b04a; }
+.spotify-zone { background: #191414; border: 2px solid #1DB954; }
+
+#timer-control h2, #period-control h2, .zone h2 { font-size: 22px; margin: 0; }
+#periodDisplay { font-size: 30px; font-weight: bold; }
+
+.team-name-input { background: transparent; border: 1px dashed transparent; color: white; font-size: 22px; font-weight: bold; text-align: center; width: 100%; font-family: inherit; transition: border 0.2s; }
+.team-name-input:hover, .team-name-input:focus { border: 1px dashed #fff; outline: none; background: rgba(255,255,255,0.1); }
+
+#timer-inputs { display: flex; justify-content: center; align-items: center; gap: 5px; font-size: 30px; font-weight: bold; }
+#timer-inputs input { background-color: #555; border: 1px solid #666; border-radius: 4px; color: white; width: 60px; font-size: 30px; font-weight: bold; text-align: center; }
+#timer-inputs span { padding-bottom: 4px; }
+
+.adjust-buttons { display: flex; justify-content: center; gap: 8px; margin-top: 5px; margin-bottom: 10px; }
+.adjust-buttons button { font-size: 14px; padding: 4px 8px; background-color: #555; color: white; border: 1px solid #777; border-radius: 4px; cursor: pointer; }
+.adjust-buttons button:hover { background-color: #777; }
+
+#max-time-display { display: flex; justify-content: center; align-items: center; gap: 4px; font-size: 14px; color: #aaa; }
+#max-time-display input { background-color: #444; border: 1px solid #666; color: #aaa; width: 35px; text-align: center; border-radius: 3px; }
+.period-buttons, #timer-buttons { display: flex; justify-content: center; align-items: center; gap: 15px; }
+#timer-buttons button { font-size: 20px; padding: 5px 15px; }
+
+.grid-3col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
+.grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+
+.blue-btn { background-color: #4a90e2; color: white; font-size: 14px; padding: 10px 5px; }
+.blue-btn:hover { background-color: #357abd; }
+.timeout-btn { background-color: #fd7e14; color: white; border: none; }
+
+button { padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 6px; font-weight: bold; border: none; transition: transform 0.1s, filter 0.2s; }
+button:active { transform: scale(0.95); }
+button:hover { filter: brightness(1.2); }
+
+.start-btn { background-color: #28a745; color: white; }
+.stop-btn { background-color: #dc3545; color: white; }
+.reset-btn { background-color: #6c757d; color: white; }
+.action-btn { background-color: #ffc107; color: black; font-size: 18px; padding: 15px; width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+.play-btn { background-color: #17a2b8; color: white; }
+.play-all-btn { background-color: #6f42c1; color: white; }
+.delete-btn { background-color: #343a40; color: white; border: 1px solid #666;}
+.controls { display: flex; align-items: center; justify-content: center; gap: 15px; font-size: 30px; }
+
+.replay-content-hidden { display: none; }
+.replay-content-active { display: flex; flex-direction: column; gap: 15px; margin-top: 15px; border-top: 1px solid #555; padding-top: 15px; }
+.replay-status { font-size: 16px; font-weight: bold; }
+.badge { background: #dc3545; padding: 2px 8px; border-radius: 10px; color: white; }
+.replay-buttons-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.penalty-section { margin-top: 15px; border-top: 1px solid #555; padding-top: 15px; }
+.penalty-section h3 { margin: 0 0 10px 0; font-size: 18px; }
+.penalty-buttons { display: flex; justify-content: center; gap: 10px; }
+.penalty-buttons button { font-size: 14px; padding: 5px 10px; background-color: #555; color: white; }
+.penalty-timers { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.penalty-item { background-color: #444; padding: 5px 10px; border-radius: 4px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; }
+.penalty-time-inputs { display: flex; align-items: center; gap: 2px; font-size: 18px; }
+.penalty-time-inputs input { background-color: transparent; border: none; color: white; font-size: 18px; font-weight: bold; width: 28px; text-align: right; -moz-appearance: textfield; }
+.penalty-time-inputs input::-webkit-outer-spin-button,
+.penalty-time-inputs input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.penalty-delete-btn { background: #c82333; border: none; color: white; cursor: pointer; border-radius: 4px; padding: 2px 6px; font-size: 14px; }
+
+.modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); justify-content: center; align-items: center; }
+.modal-content { background-color: #333; padding: 20px; border-radius: 10px; border: 2px solid #555; width: 90%; max-width: 800px; max-height: 80%; overflow-y: auto; text-align: center; }
+.modal-content h3 { margin-top: 0; }
+.player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin-bottom: 20px; }
+.player-grid button { background: #444; font-size: 13px; padding: 10px; border: 1px solid #666; color: white; }
+.player-grid button b { font-size: 16px; color: #ffc107; }
+.player-grid button:hover { background: #555; border-color: #ffc107; }
+.player-grid .staff-btn { background: #2b3a4a; }
+.player-grid .staff-btn b { color: #4a90e2; }
+.modal-close-btn { background: #dc3545; width: 100%; color: white; }
+
+/* Styles spécifiques Spotify - Mapping & Custom */
+.spotify-mappings { display: flex; flex-direction: column; gap: 8px; background-color: #282828; padding: 15px; border-radius: 8px; }
+.mapping-row { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+.mapping-row select { width: 60%; padding: 6px; background-color: #404040; color: white; border: 1px solid #555; border-radius: 4px; font-size: 13px; }
+.mapping-row select:focus { outline: 1px solid #1DB954; }
+
+.custom-map-row { gap: 5px; justify-content: flex-start !important; }
+.custom-map-row input { flex: 1; padding: 6px; background: #404040; border: 1px solid #555; color: white; border-radius: 4px; font-size: 13px; }
+.custom-map-row select { flex: 1; padding: 6px; font-size: 13px; }
+.del-map-btn { background: #dc3545; color: white; border: none; border-radius: 4px; padding: 6px 10px; font-size: 12px; }
+
+/* Bouton Rectangulaire de Repli (Header Spotify) */
+.fold-config-btn {
+  flex: 1.5;
+  background-color: #282828;
+  color: white;
+  border: 1px solid #1DB954;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  margin: 0 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  transition: background-color 0.2s;
+}
+.fold-config-btn:hover { background-color: #404040; }
+
+/* Lancement Rapide */
+.quick-launch-section { margin-top: 15px; border-top: 1px solid #555; padding-top: 15px; }
+.quick-launch-grid { display: flex; justify-content: center; flex-wrap: nowrap; gap: 15px; }
+.quick-launch-btn {
+    background: #282828; border: 2px solid transparent; border-radius: 8px; color: white; padding: 3px;
+    cursor: pointer; width: 60px; height: 60px; display: flex; justify-content: center; align-items: center;
+    transition: transform 0.1s, border-color 0.2s;
+}
+.quick-launch-btn:hover { border-color: #1DB954; transform: scale(1.05); }
+.quick-launch-btn img { width: 100%; height: 100%; border-radius: 4px; object-fit: cover; }
+.more-btn div { width: 100%; height: 100%; background: #333; border-radius: 4px; display: flex; justify-content: center; align-items: center; font-size: 28px; font-weight: bold; color: #1DB954; }
+
+.modal-launch-btn { background: #282828; border: 2px solid transparent; border-radius: 8px; color: white; padding: 5px; cursor: pointer; width: 85px; display: flex; flex-direction: column; align-items: center; gap: 5px; transition: transform 0.1s, border-color 0.2s; }
+.modal-launch-btn img { width: 70px; height: 70px; border-radius: 4px; object-fit: cover; }
+.modal-launch-btn span { font-size: 11px; font-weight: bold; text-align: center; line-height: 1.2; word-wrap: break-word; width: 100%; }
+.modal-launch-btn:hover { border-color: #1DB954; transform: scale(1.05); }
+
+/* --- CSS COMPLET DE LA SPOTIFY WEB APP --- */
+#webapp-header { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; background-color: #181818; padding: 15px 20px; border-bottom: 1px solid #282828; }
+#header-left { display: flex; justify-content: flex-start; gap: 10px; }
+#header-center { text-align: center; }
+
+.menubtn { background-color: #282828; color: white; padding: 6px 12px; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
+.menubtn:hover { background-color: #404040; }
+.dropdown { position: relative; display: inline-block; }
+.dropdown-content { display: none; position: absolute; background-color: #282828; min-width: 160px; box-shadow: 0px 8px 16px rgba(0,0,0,0.3); z-index: 1001; border-radius: 4px; padding: 5px 0; }
+.dropdown-content a { color: white; padding: 10px 15px; text-decoration: none; display: block; font-size: 13px; }
+.dropdown-content a:hover { background-color: #404040; }
+.dropdown-content hr { border: 1px solid #404040; margin: 5px 0; }
+.show { display: block; }
+
+#webapp-main { display: grid; grid-template-columns: 1fr 1fr; flex: 1; overflow: hidden; }
+#webapp-left-pane, #webapp-right-pane { overflow-y: auto; padding: 15px; }
+#webapp-right-pane { border-left: 1px solid #282828; }
+
+#webapp-playlists-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; }
+.webapp-playlist-item { background-color: #282828; border-radius: 8px; padding: 10px; transition: background-color 0.2s; position: relative; }
+.webapp-playlist-item:hover { background-color: #404040; }
+.webapp-playlist-item img { width: 100%; border-radius: 4px; aspect-ratio: 1/1; object-fit: cover; cursor: pointer; }
+.webapp-playlist-item p { margin-top: 8px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; font-size: 13px; }
+.webapp-play-button { position: absolute; bottom: 45px; right: 15px; background-color: #1DB954; color: black; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 18px; display: flex; justify-content: center; align-items: center; cursor: pointer; opacity: 0; transition: opacity 0.2s, transform 0.2s; transform: translateY(10px); }
+.webapp-playlist-item:hover .webapp-play-button { opacity: 1; transform: translateY(0); }
+.webapp-fav-check { position: absolute; top: 10px; left: 10px; z-index: 10; cursor: pointer; }
+
+.webapp-playlist-header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
+.webapp-playlist-header img { width: 100px; height: 100px; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+.webapp-track-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 4px; cursor: pointer; }
+.webapp-track-item:hover { background-color: #282828; }
+.webapp-track-item img { width: 40px; height: 40px; object-fit: cover; }
+.webapp-track-info { overflow: hidden; display: flex; flex-direction: column; text-align: left; }
+.webapp-track-info h3 { margin: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.webapp-track-info p { margin: 0; font-size: 12px; color: #b3b3b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Texte Vert (Actif) */
+.active-text { color: #1DB954 !important; }
+
+#webapp-footer { background-color: #181818; display: grid; grid-template-columns: 1fr 2fr 1fr; align-items: center; padding: 15px; border-top: 1px solid #282828; visibility: hidden; flex-shrink: 0;}
+#webapp-now-playing { display: flex; align-items: center; overflow: hidden; gap: 10px; }
+#webapp-now-playing img { width: 50px; height: 50px; border-radius: 4px; }
+#webapp-np-info { display: flex; flex-direction: column; overflow: hidden; text-align: left; }
+#webapp-np-title { font-weight: bold; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#webapp-np-artist { font-size: 11px; color: #b3b3b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#webapp-player-controls { display: flex; flex-direction: column; align-items: center; }
+#webapp-player-buttons { display: flex; align-items: center; gap: 15px; }
+#webapp-player-buttons button { background: none; border: none; color: #b3b3b3; font-size: 20px; cursor: pointer; }
+#webapp-player-buttons button:hover { color: white; }
+#webapp-play-pause-btn { font-size: 30px !important; color: white !important; }
+#webapp-progress-bar-container { display: flex; align-items: center; gap: 8px; width: 100%; max-width: 300px; margin-top: 5px; }
+#webapp-progress-bar-container input[type="range"] { flex: 1; -webkit-appearance: none; appearance: none; background: transparent; height: 4px; border-radius: 2px; }
+#webapp-progress-bar-container input[type="range"]::-webkit-slider-runnable-track { background: #4d4d4d; height: 4px; border-radius: 2px; }
+#webapp-progress-bar-container input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -4px; background-color: white; height: 12px; width: 12px; border-radius: 50%; }
+.time-label { font-size: 11px; color: #b3b3b3; }
+
+#webapp-right-controls { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding-right: 10px;}
+#devices-button { background: none; border: none; color: white; cursor: pointer; font-size: 18px; }
+.context-menu { position: absolute; background-color: #282828; border-radius: 4px; padding: 5px; z-index: 1001; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+.context-menu-item { padding: 10px 15px; cursor: pointer; color: white; white-space: nowrap; font-size: 13px;}
+.context-menu-item:hover { background-color: #404040; }
