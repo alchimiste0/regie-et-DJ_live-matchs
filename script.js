@@ -6,9 +6,35 @@ let currentPeriodIndex = 0; let timerInterval = null; let timerCurrentSeconds = 
 let penalties = { A: [], B: [] };
 
 let replayList = []; let replayBufferActive = false; let playQueue = []; let sceneItemIds = {}; let currentLiveScene = "LIVE"; let isLoopingAll = false; 
-const mtItemsNormal = ["RESUME", "SCORES_DIRECT", "SCORE", "CLASSEMENT-COMPLET", "POINTEURS-COMPLET", "PUBLICITE1", "PUBLICITE2", "SPONSORS"];
-const mtItemsReplay = ["RESUME", "SCORE", "CLASSEMENT-COMPLET", "POINTEURS-COMPLET", "PUBLICITE1", "PUBLICITE2", "SPONSORS", "SCORES_DIRECT"];
-let mtFolderIndex = 0; let mtReplayIndex = 0; let currentCycleMode = null; let mtPhase = 'FOLDER'; let cycleTimeout = null;
+
+// --- NOUVEAU GESTIONNAIRE DE SÉQUENCES ---
+let sequences = JSON.parse(localStorage.getItem('obs_sequences'));
+if (!sequences) {
+    // Séquences par défaut si c'est la première fois
+    sequences = {
+        mtInfos: [
+            {name: "RESUME", isVideo: false}, {name: "SCORE", isVideo: false}, 
+            {name: "CLASSEMENT-COMPLET", isVideo: false}, {name: "POINTEURS-COMPLET", isVideo: false}
+        ],
+        mtPubs: [
+            {name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}
+        ],
+        finPubs: [
+            {name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}
+        ]
+    };
+    localStorage.setItem('obs_sequences', JSON.stringify(sequences));
+}
+
+let seqMode = null; 
+let seqTimeout = null;
+let availableObsSources = [];
+
+// États des moteurs
+let mtState = { phase: 'SPORT', infoIdx: 0, replayIdx: 0, pubIdx: 0, activeSource: null, scene: null };
+let finState = { phase: 'REPLAY', replayIdx: 0, pubIdx: 0, loopCount: 0, startTime: 0, activeSource: null };
+// -----------------------------------------
+
 let teamRoster = { A: [], B: [] }; let graphicTimeouts = {}; let pendingSelectionData = null; let pendingSelectionType = null; 
 
 const sourceNames = {
@@ -45,13 +71,265 @@ function updateTeamName(team, newName) { updateOBSText(team === 'A' ? sourceName
 function directChangeScore(team, delta) { scores[team] = Math.max(0, scores[team] + delta); document.getElementById("score" + team).textContent = scores[team]; updateOBSText(sourceNames[team], scores[team]); }
 function resizeBoxes(delta) { boxSize = Math.max(0, boxSize + delta); document.querySelectorAll(".zone").forEach(zone => { zone.style.padding = boxSize + "px " + (boxSize * 2) + "px"; }); }
 function toggleLayout() { document.body.classList.toggle("horizontal-layout"); }
-function switchScene(sceneName) { if (!ensureOBSConnection()) return; if (sceneName !== sourceNames.miTempsScene && sceneName !== sourceNames.miTempsReplayScene) { currentCycleMode = null; clearTimeout(cycleTimeout); } sendReq("SetCurrentProgramScene", { sceneName: sceneName }); currentLiveScene = sceneName; }
+function switchScene(sceneName) { 
+  if (!ensureOBSConnection()) return; 
+  if (sceneName !== sourceNames.miTempsScene && sceneName !== sourceNames.miTempsReplayScene && sceneName !== sourceNames.finMatchReplayScene && sceneName !== sourceNames.replayScene) { 
+      forceStopReplay(); // Coupe automatiquement le cycle si on passe au direct
+  } 
+  sendReq("SetCurrentProgramScene", { sceneName: sceneName }); 
+  currentLiveScene = sceneName; 
+}
 function triggerGraphic(sourceName) { setSourceVisibility(sourceName, true, sourceNames.sceneName); if (graphicTimeouts[sourceName]) clearTimeout(graphicTimeouts[sourceName]); graphicTimeouts[sourceName] = setTimeout(() => { setSourceVisibility(sourceName, false, sourceNames.sceneName); }, 5000); }
 
-function handleMiTempsClick() { forceStopReplay(); const useReplay = replayBufferActive && replayList.length > 0; currentCycleMode = useReplay ? 'MT_REPLAY' : 'MT_SIMPLE'; const targetScene = useReplay ? sourceNames.miTempsReplayScene : sourceNames.miTempsScene; switchScene(targetScene); mtFolderIndex = 0; mtReplayIndex = 0; mtPhase = 'FOLDER'; mtItemsNormal.forEach(item => setSourceVisibility(item, false, sourceNames.miTempsScene)); mtItemsReplay.forEach(item => setSourceVisibility(item, false, sourceNames.miTempsReplayScene)); setSourceVisibility(sourceNames.replayMediaMT, false, sourceNames.miTempsReplayScene); if (currentCycleMode === 'MT_SIMPLE') runMiTempsNormalCycle(); else runMiTempsReplayCycle(); }
-function runMiTempsNormalCycle() { if (currentCycleMode !== 'MT_SIMPLE') return; const targetScene = sourceNames.miTempsScene; const prevIndex = (mtFolderIndex - 1 + mtItemsNormal.length) % mtItemsNormal.length; setSourceVisibility(mtItemsNormal[prevIndex], false, targetScene); const currentItem = mtItemsNormal[mtFolderIndex]; setSourceVisibility(currentItem, true, targetScene); cycleTimeout = setTimeout(() => { if (currentCycleMode !== 'MT_SIMPLE') return; setSourceVisibility(currentItem, false, targetScene); mtFolderIndex = (mtFolderIndex + 1) % mtItemsNormal.length; runMiTempsNormalCycle(); }, 5000); }
-function runMiTempsReplayCycle() { if (currentCycleMode !== 'MT_REPLAY') return; const targetScene = sourceNames.miTempsReplayScene; if (mtPhase === 'FOLDER') { setSourceVisibility(sourceNames.replayMediaMT, false, targetScene); const prevIndex = (mtFolderIndex - 1 + mtItemsReplay.length) % mtItemsReplay.length; setSourceVisibility(mtItemsReplay[prevIndex], false, targetScene); const currentItem = mtItemsReplay[mtFolderIndex]; setSourceVisibility(currentItem, true, targetScene); cycleTimeout = setTimeout(() => { if (currentCycleMode !== 'MT_REPLAY') return; mtPhase = 'REPLAY'; runMiTempsReplayCycle(); }, 5000); } else if (mtPhase === 'REPLAY') { const currentItem = mtItemsReplay[mtFolderIndex]; setSourceVisibility(currentItem, false, targetScene); if (replayList.length === 0) { mtFolderIndex = (mtFolderIndex + 1) % mtItemsReplay.length; mtPhase = 'FOLDER'; runMiTempsReplayCycle(); return; } const nextFile = replayList[mtReplayIndex]; mtReplayIndex = (mtReplayIndex + 1) % replayList.length; sendReq("SetInputSettings", { inputName: sourceNames.replayMediaMT, inputSettings: { local_file: nextFile, is_local_file: true, looping: false, restart_on_activate: true, speed_percent: 60 } }); sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaMT, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART" }); sendReq("SetInputMute", { inputName: sourceNames.replayMediaMT, inputMuted: true }); setSourceVisibility(sourceNames.replayMediaMT, true, targetScene); } }
-function handleFinMatchClick() { forceStopReplay(); const useReplay = replayBufferActive && replayList.length > 0; if (useReplay) { switchScene(sourceNames.finMatchReplayScene); playQueue = [...replayList]; isLoopingAll = true; playNextVideoContext('FIN_MATCH'); } else { switchScene(sourceNames.finMatchScene); } }
+// ==========================================
+// MOTEUR DYNAMIQUE : MI-TEMPS & FIN DE MATCH
+// ==========================================
+
+function hideActiveSeqSource(state) {
+    if (state.activeSource) {
+        setSourceVisibility(state.activeSource, false, state.scene);
+        state.activeSource = null;
+    }
+}
+
+function restartMediaSource(inputName) {
+    sendReq("TriggerMediaInputAction", { inputName: inputName, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART" });
+}
+
+function playReplayFile(mediaSource, scene, file) {
+    sendReq("SetInputSettings", { inputName: mediaSource, inputSettings: { local_file: file, is_local_file: true, looping: false, restart_on_activate: true, speed_percent: 60 } });
+    restartMediaSource(mediaSource);
+    sendReq("SetInputMute", { inputName: mediaSource, inputMuted: true });
+    setSourceVisibility(mediaSource, true, scene);
+}
+
+// Lancement de la Mi-Temps Automatique
+function handleMiTempsClick() { 
+    forceStopReplay(); 
+    const useReplay = replayBufferActive && replayList.length > 0; 
+    seqMode = 'MI_TEMPS'; 
+    mtState.scene = useReplay ? sourceNames.miTempsReplayScene : sourceNames.miTempsScene; 
+    switchScene(mtState.scene); 
+    
+    // On cache tout avant de commencer
+    [...sequences.mtInfos, ...sequences.mtPubs].forEach(s => setSourceVisibility(s.name, false, mtState.scene)); 
+    setSourceVisibility(sourceNames.replayMediaMT, false, mtState.scene); 
+    
+    mtState.phase = 'SPORT'; 
+    mtState.infoIdx = 0; 
+    mtState.replayIdx = 0; 
+    mtState.pubIdx = 0; 
+    mtState.activeSource = null; 
+    
+    stepMiTemps(); 
+}
+
+function stepMiTemps() { 
+    if (seqMode !== 'MI_TEMPS') return; 
+    hideActiveSeqSource(mtState); 
+    setSourceVisibility(sourceNames.replayMediaMT, false, mtState.scene); 
+    
+    if (mtState.phase === 'SPORT') { 
+        const useReplay = replayBufferActive && replayList.length > 0; 
+        
+        // Alternance : Info -> Replay -> Info -> Replay
+        if (mtState.infoIdx === mtState.replayIdx || !useReplay) { 
+            // On joue une info graphique
+            if (mtState.infoIdx >= sequences.mtInfos.length) { 
+                // Fin des infos sportives, on passe aux pubs
+                if (sequences.mtPubs.length > 0) { 
+                    mtState.phase = 'PUB'; 
+                    mtState.pubIdx = 0; 
+                    stepMiTemps(); 
+                } else { 
+                    // Aucune pub configurée, on boucle les infos sportives
+                    mtState.infoIdx = 0; 
+                    mtState.replayIdx = 0; 
+                    stepMiTemps(); 
+                } 
+                return; 
+            } 
+            const item = sequences.mtInfos[mtState.infoIdx]; 
+            mtState.activeSource = item.name; 
+            setSourceVisibility(item.name, true, mtState.scene); 
+            mtState.infoIdx++; 
+            
+            if (item.isVideo) { 
+                restartMediaSource(item.name); // Attend l'event OBS pour passer à la suite
+            } else { 
+                seqTimeout = setTimeout(stepMiTemps, 5000); // 5 sec pour les images
+            } 
+        } else { 
+            // On joue un Replay
+            if (mtState.replayIdx >= replayList.length) { 
+                // Si on a moins de replays que d'infos, on compense l'index
+                mtState.replayIdx = mtState.infoIdx; 
+                stepMiTemps(); 
+                return; 
+            } 
+            const nextFile = replayList[mtState.replayIdx]; 
+            mtState.replayIdx++; 
+            playReplayFile(sourceNames.replayMediaMT, mtState.scene, nextFile); 
+        } 
+    } else if (mtState.phase === 'PUB') { 
+        if (mtState.pubIdx >= sequences.mtPubs.length) { 
+            // Fin du bloc de pub, on relance le cycle sportif
+            mtState.phase = 'SPORT'; 
+            mtState.infoIdx = 0; 
+            mtState.replayIdx = 0; 
+            stepMiTemps(); 
+            return; 
+        } 
+        const item = sequences.mtPubs[mtState.pubIdx]; 
+        mtState.activeSource = item.name; 
+        setSourceVisibility(item.name, true, mtState.scene); 
+        mtState.pubIdx++; 
+        
+        if (item.isVideo) { 
+            restartMediaSource(item.name); 
+        } else { 
+            seqTimeout = setTimeout(stepMiTemps, 5000); 
+        } 
+    } 
+}
+
+// Lancement du Générique de Fin de Match (Replays & Pubs)
+function startFinMatchReplayCycle() {
+    forceStopReplay(); 
+    seqMode = 'FIN_MATCH'; 
+    finState.scene = sourceNames.finMatchReplayScene; 
+    switchScene(finState.scene); 
+    
+    sequences.finPubs.forEach(s => setSourceVisibility(s.name, false, finState.scene)); 
+    setSourceVisibility(sourceNames.replayMediaFin, false, finState.scene); 
+    
+    finState.phase = 'REPLAY'; 
+    finState.replayIdx = 0; 
+    finState.pubIdx = 0; 
+    finState.loopCount = 0; 
+    finState.startTime = Date.now(); 
+    finState.activeSource = null; 
+    
+    stepFinMatch();
+}
+
+function stepFinMatch() {
+    if (seqMode !== 'FIN_MATCH') return; 
+    hideActiveSeqSource(finState); 
+    
+    if (finState.phase === 'REPLAY') { 
+        const useReplay = replayBufferActive && replayList.length > 0; 
+        
+        if (!useReplay) { 
+            // Si pas de replays capturés, on passe directement aux pubs de fin
+            if (sequences.finPubs.length > 0) { 
+                finState.phase = 'PUB'; 
+                finState.pubIdx = 0; 
+                stepFinMatch(); 
+            } 
+            return; 
+        } 
+        
+        // VÉRIFICATION TRANQUILLE ENTRE 2 REPLAYS
+        const timeElapsed = Date.now() - finState.startTime; 
+        // Si + de 2 minutes de replays OU + de 2 boucles terminées, on envoie la pub !
+        if ((timeElapsed > 120000 || finState.loopCount >= 2) && sequences.finPubs.length > 0) { 
+            finState.phase = 'PUB'; 
+            finState.pubIdx = 0; 
+            setSourceVisibility(sourceNames.replayMediaFin, false, finState.scene); 
+            stepFinMatch(); 
+            return; 
+        } 
+        
+        if (finState.replayIdx >= replayList.length) { 
+            finState.replayIdx = 0; 
+            finState.loopCount++; 
+            stepFinMatch(); 
+            return; 
+        } 
+        
+        const nextFile = replayList[finState.replayIdx]; 
+        finState.replayIdx++; 
+        playReplayFile(sourceNames.replayMediaFin, finState.scene, nextFile); 
+        
+    } else if (finState.phase === 'PUB') { 
+        if (finState.pubIdx >= sequences.finPubs.length) { 
+            // Fin des pubs, on relance la boucle de replays
+            finState.phase = 'REPLAY'; 
+            finState.startTime = Date.now(); 
+            finState.loopCount = 0; 
+            finState.replayIdx = 0; 
+            stepFinMatch(); 
+            return; 
+        } 
+        
+        const item = sequences.finPubs[finState.pubIdx]; 
+        finState.activeSource = item.name; 
+        setSourceVisibility(item.name, true, finState.scene); 
+        finState.pubIdx++; 
+        
+        if (item.isVideo) { 
+            restartMediaSource(item.name); 
+        } else { 
+            seqTimeout = setTimeout(stepFinMatch, 5000); 
+        } 
+    } 
+}
+
+// ----------------------------------------------------
+// UI GESTIONNAIRE DE SÉQUENCES
+// ----------------------------------------------------
+function toggleSequenceConfig() {
+    const content = document.getElementById('sequence-config-content');
+    const chevron = document.getElementById('sequence-config-chevron');
+    if (content.style.display === 'none') {
+        content.style.display = 'block'; chevron.textContent = '▲';
+        if (availableObsSources.length === 0) loadObsSourcesForSequences();
+    } else { content.style.display = 'none'; chevron.textContent = '▼'; }
+}
+
+function loadObsSourcesForSequences() {
+    availableObsSources = [];
+    sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsScene }, "get_sources_mt");
+    sendReq("GetSceneItemList", { sceneName: sourceNames.finMatchReplayScene }, "get_sources_fin");
+}
+
+function updateSequenceSelects() {
+    const options = '<option value="">-- Sélectionner une source OBS --</option>' + 
+        availableObsSources.sort().map(s => `<option value="${s}">${s}</option>`).join('');
+    document.getElementById('select-mt-infos').innerHTML = options;
+    document.getElementById('select-mt-pubs').innerHTML = options;
+    document.getElementById('select-fin-pubs').innerHTML = options;
+}
+
+function renderSequenceList() {
+    ['mtInfos', 'mtPubs', 'finPubs'].forEach(listName => {
+        const container = document.getElementById(`list-${listName.replace(/([A-Z])/g, "-$1").toLowerCase()}`);
+        if (!container) return; container.innerHTML = '';
+        sequences[listName].forEach((item, idx) => {
+            const div = document.createElement('div');
+            div.className = 'seq-item' + (item.isVideo ? ' is-video' : '');
+            div.innerHTML = `<span>${item.isVideo ? '🎥' : '🖼️'} ${item.name}</span> <button class="seq-item-del" onclick="deleteSequenceItem('${listName}', ${idx})">❌</button>`;
+            container.appendChild(div);
+        });
+    });
+    localStorage.setItem('obs_sequences', JSON.stringify(sequences));
+}
+
+function addSequenceItem(listName) {
+    const selectId = `select-${listName.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
+    const val = document.getElementById(selectId).value;
+    if (!val) return;
+    const isVid = val.toUpperCase().includes('VIDEO');
+    sequences[listName].push({ name: val, isVideo: isVid });
+    renderSequenceList();
+}
+
+function deleteSequenceItem(listName, idx) { sequences[listName].splice(idx, 1); renderSequenceList(); }
+
+// ==========================================
+// SUITE DU CODE ORIGINAL (POPUP BUT, PENALITES, REPLAY MANUEL)
+// ==========================================
 
 let currentModalAction = null; let currentModalTeam = null; let currentModalDuration = null; let overlayDisplayTimeout = null;
 function promptGoal(team) { openPlayerModal('BUT', team, null); }
@@ -79,12 +357,42 @@ function updateReplayBtnUI() { const btn = document.getElementById("toggleReplay
 function toggleReplayBuffer() { sendReq(replayBufferActive ? "StopReplayBuffer" : "StartReplayBuffer"); }
 function saveReplay() { sendReq("SaveReplayBuffer"); document.getElementById("saveReplayBtn").textContent = "⏳ Capture en cours..."; }
 function playReplays(paths) { if (!ensureOBSConnection() || paths.length === 0) return; forceStopReplay(); playQueue = [...paths]; switchScene(sourceNames.replayScene); setSourceVisibility(sourceNames.replayImageNormal, true, sourceNames.replayScene); playNextVideoContext('NORMAL'); }
-function playNextVideoContext(context) { const mediaSource = context === 'NORMAL' ? sourceNames.replayMediaNormal : sourceNames.replayMediaFin; const scene = context === 'NORMAL' ? sourceNames.replayScene : sourceNames.finMatchReplayScene; if (playQueue.length > 0) { const nextFile = playQueue.shift(); sendReq("SetInputSettings", { inputName: mediaSource, inputSettings: { local_file: nextFile, is_local_file: true, looping: false, restart_on_activate: true, speed_percent: 60 } }); sendReq("TriggerMediaInputAction", { inputName: mediaSource, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART" }); sendReq("SetInputMute", { inputName: mediaSource, inputMuted: true }); setSourceVisibility(mediaSource, true, scene); } else { const isLoopChecked = document.getElementById("loopReplaysCheckbox").checked; if ((context === 'NORMAL' && isLoopingAll && isLoopChecked && replayList.length > 0) || (context === 'FIN_MATCH' && replayList.length > 0)) { playQueue = [...replayList]; playNextVideoContext(context); } else { hideReplayOnStream(context); } } }
+function playNextVideoContext(context) { 
+    const mediaSource = sourceNames.replayMediaNormal; const scene = sourceNames.replayScene; 
+    if (playQueue.length > 0) { 
+        const nextFile = playQueue.shift(); playReplayFile(mediaSource, scene, nextFile);
+    } else { 
+        const isLoopChecked = document.getElementById("loopReplaysCheckbox").checked; 
+        if (isLoopingAll && isLoopChecked && replayList.length > 0) { 
+            playQueue = [...replayList]; playNextVideoContext(context); 
+        } else { hideReplayOnStream(context); } 
+    } 
+}
 function playLastReplay() { if (replayList.length > 0) { isLoopingAll = false; playReplays([replayList[replayList.length - 1]]); } else alert("Aucune vidéo capturée !"); }
 function playAllReplays() { if (replayList.length > 0) { isLoopingAll = true; playReplays(replayList); } else alert("Liste vide !"); }
 function clearReplays() { replayList = []; playQueue = []; document.getElementById("replayCount").innerText = "0"; document.getElementById("deleteBtn").textContent = "✅ Vidé !"; setTimeout(() => { document.getElementById("deleteBtn").textContent = "🗑️ Vider la liste"; }, 1500); }
-function hideReplayOnStream(context = 'NORMAL') { const mediaSource = context === 'NORMAL' ? sourceNames.replayMediaNormal : sourceNames.replayMediaFin; const scene = context === 'NORMAL' ? sourceNames.replayScene : sourceNames.finMatchReplayScene; playQueue = []; isLoopingAll = false; sendReq("TriggerMediaInputAction", { inputName: mediaSource, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); setSourceVisibility(mediaSource, false, scene); if (context === 'NORMAL') { setSourceVisibility(sourceNames.replayImageNormal, false, scene); if (currentLiveScene === sourceNames.replayScene) switchScene(sourceNames.sceneName); } }
-function forceStopReplay() { playQueue = []; isLoopingAll = false; currentCycleMode = null; clearTimeout(cycleTimeout); sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaNormal, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaFin, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaMT, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); mtItemsNormal.forEach(item => setSourceVisibility(item, false, sourceNames.miTempsScene)); mtItemsReplay.forEach(item => setSourceVisibility(item, false, sourceNames.miTempsReplayScene)); if (currentLiveScene === sourceNames.replayScene) { setSourceVisibility(sourceNames.replayImageNormal, false, sourceNames.replayScene); switchScene(sourceNames.sceneName); } else if (currentLiveScene === sourceNames.finMatchReplayScene) { switchScene(sourceNames.finMatchScene); } else if (currentLiveScene === sourceNames.miTempsReplayScene) { switchScene(sourceNames.miTempsScene); } }
+function hideReplayOnStream(context = 'NORMAL') { 
+    const mediaSource = sourceNames.replayMediaNormal; const scene = sourceNames.replayScene; 
+    playQueue = []; isLoopingAll = false; 
+    sendReq("TriggerMediaInputAction", { inputName: mediaSource, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); 
+    setSourceVisibility(mediaSource, false, scene); 
+    setSourceVisibility(sourceNames.replayImageNormal, false, scene); 
+    if (currentLiveScene === sourceNames.replayScene) switchScene(sourceNames.sceneName); 
+}
+function forceStopReplay() { 
+    playQueue = []; isLoopingAll = false; seqMode = null; clearTimeout(seqTimeout); 
+    sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaNormal, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); 
+    sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaFin, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); 
+    sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaMT, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); 
+    
+    hideActiveSeqSource(mtState); hideActiveSeqSource(finState);
+    [...sequences.mtInfos, ...sequences.mtPubs].forEach(item => { setSourceVisibility(item.name, false, sourceNames.miTempsScene); setSourceVisibility(item.name, false, sourceNames.miTempsReplayScene); });
+    sequences.finPubs.forEach(item => { setSourceVisibility(item.name, false, sourceNames.finMatchReplayScene); });
+
+    if (currentLiveScene === sourceNames.replayScene) { setSourceVisibility(sourceNames.replayImageNormal, false, sourceNames.replayScene); switchScene(sourceNames.sceneName); } 
+    else if (currentLiveScene === sourceNames.finMatchReplayScene) { switchScene(sourceNames.finMatchScene); } 
+    else if (currentLiveScene === sourceNames.miTempsReplayScene || currentLiveScene === sourceNames.miTempsScene) { switchScene(sourceNames.sceneName); } 
+}
 
 function sendReq(type, data = {}, reqId = null) { if (!ensureOBSConnection()) return; obs.send(JSON.stringify({ op: 6, d: { requestType: type, requestId: reqId || (type + Date.now()), requestData: data } })); }
 function connectOBS() {
@@ -98,14 +406,23 @@ function connectOBS() {
             if (t === "ReplayBufferStateChanged") { replayBufferActive = d.outputActive; updateReplayBtnUI(); } 
             else if (t === "ReplayBufferSaved") { if (d.savedReplayPath && !replayList.includes(d.savedReplayPath)) { replayList.push(d.savedReplayPath); document.getElementById("replayCount").innerText = replayList.length; document.getElementById("saveReplayBtn").textContent = "✅ Action capturée !"; setTimeout(() => { document.getElementById("saveReplayBtn").textContent = "📸 Capturer l'action !"; }, 2000); } } 
             else if (t === "MediaInputPlaybackEnded") { 
-                if (d.inputName === sourceNames.replayMediaNormal) playNextVideoContext('NORMAL'); else if (d.inputName === sourceNames.replayMediaFin) playNextVideoContext('FIN_MATCH');
-                else if (d.inputName === sourceNames.replayMediaMT) { if (currentCycleMode === 'MT_REPLAY') { setSourceVisibility(sourceNames.replayMediaMT, false, sourceNames.miTempsReplayScene); mtFolderIndex = (mtFolderIndex + 1) % mtItemsReplay.length; mtPhase = 'FOLDER'; runMiTempsReplayCycle(); } }
+                if (d.inputName === sourceNames.replayMediaNormal) { playNextVideoContext('NORMAL'); } 
+                else if (seqMode === 'MI_TEMPS') {
+                    if (d.inputName === sourceNames.replayMediaMT || mtState.activeSource === d.inputName) { stepMiTemps(); }
+                }
+                else if (seqMode === 'FIN_MATCH') {
+                    if (d.inputName === sourceNames.replayMediaFin || finState.activeSource === d.inputName) { stepFinMatch(); }
+                }
             }
         } 
         else if (p.op === 7) {
             if (!p.d.requestStatus.result) return;
             if (p.d.requestId === "init-replay-status") { replayBufferActive = p.d.responseData.outputActive; updateReplayBtnUI(); } 
             else if (p.d.requestId.startsWith("getid:::")) { const pts = p.d.requestId.split(":::"); sceneItemIds[pts[1] + ":::" + pts[2]] = p.d.responseData.sceneItemId; sendReq("SetSceneItemEnabled", { sceneName: pts[1], sceneItemId: p.d.responseData.sceneItemId, sceneItemEnabled: pts[3] === "true" }); }
+            else if (p.d.requestId.startsWith("get_sources_")) {
+                p.d.responseData.sceneItems.forEach(item => { if (!availableObsSources.includes(item.sourceName)) availableObsSources.push(item.sourceName); });
+                updateSequenceSelects();
+            }
         }
     };
     obs.onerror = err => console.error("❌ Erreur OBS :", err);
@@ -127,7 +444,6 @@ function fetchRolskanetData() { const input = document.getElementById("rolskanet
 // ==========================================
 
 const SPOTIFY_CLIENT_ID = "5bc17dabfc0945b7b6ba5ee2989a25f1"; 
-// S'adapte automatiquement à l'adresse exacte où tu te trouves (en local ou sur GitHub Pages)
 const SPOTIFY_REDIRECT_URI = window.location.origin + window.location.pathname;
 const SPOTIFY_SCOPES = ["user-modify-playback-state", "user-read-playback-state", "playlist-read-private", "playlist-read-collaborative"];
 
@@ -448,4 +764,4 @@ async function initSpotifyModule() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => { resetTimer(); renderPenalties(); connectOBS(); initSpotifyModule(); });
+document.addEventListener('DOMContentLoaded', () => { resetTimer(); renderPenalties(); connectOBS(); initSpotifyModule(); renderSequenceList(); });

@@ -132,8 +132,48 @@
           <div class="grid-2col">
             <button class="blue-btn" onclick="switchScene(sourceNames.sceneName)">Live</button>
             <button class="blue-btn" onclick="switchScene(sourceNames.compoScene)">Composition</button>
-            <button class="blue-btn" onclick="handleMiTempsClick()">Mi-temps</button>
-            <button class="blue-btn" onclick="handleFinMatchClick()">Fin de match</button>
+            <button class="blue-btn" onclick="handleMiTempsClick()">Mi-temps (Auto)</button>
+            <button class="blue-btn" style="background-color: #dc3545;" onclick="switchScene(sourceNames.finMatchScene)">Fin (Direct Piste)</button>
+          </div>
+          <button class="action-btn" style="margin-top: 10px; font-size: 14px; padding: 10px; background-color: #6f42c1; color: white;" onclick="startFinMatchReplayCycle()">🎬 Lancer le Générique de Fin (Replays & Pubs)</button>
+        </div>
+
+        <!-- ZONE GESTIONNAIRE DE ROTATION (PUBS & INFOS) -->
+        <div id="sequence-control" class="zone sequence-zone">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2 style="color: #ffc107; margin: 0; font-size: 18px; flex: 1; text-align: left;">📺 Régie Séquences</h2>
+            <button onclick="toggleSequenceConfig()" class="fold-config-btn" style="border-color: #ffc107;">
+              Paramètres <span id="sequence-config-chevron" style="color: #ffc107;">▼</span>
+            </button>
+          </div>
+          
+          <div id="sequence-config-content" style="display: none; margin-top: 15px; text-align: left;">
+            
+            <!-- MI-TEMPS : INFOS SPORTIVES -->
+            <h3 class="seq-title">Mi-Temps : Infos (5 sec)</h3>
+            <div id="list-mt-infos" class="seq-list"></div>
+            <div class="seq-add-row">
+              <select id="select-mt-infos"><option value="">Chargement d'OBS...</option></select>
+              <button onclick="addSequenceItem('mtInfos')">+</button>
+            </div>
+
+            <!-- MI-TEMPS : PUBS & SPONSORS -->
+            <h3 class="seq-title" style="margin-top: 15px;">Mi-Temps : Pubs & Sponsors</h3>
+            <div id="list-mt-pubs" class="seq-list"></div>
+            <div class="seq-add-row">
+              <select id="select-mt-pubs"><option value="">Chargement d'OBS...</option></select>
+              <button onclick="addSequenceItem('mtPubs')">+</button>
+            </div>
+
+            <!-- FIN DE MATCH : PUBS & SPONSORS -->
+            <h3 class="seq-title" style="margin-top: 15px;">Fin de match : Pubs & Sponsors</h3>
+            <div id="list-fin-pubs" class="seq-list"></div>
+            <div class="seq-add-row">
+              <select id="select-fin-pubs"><option value="">Chargement d'OBS...</option></select>
+              <button onclick="addSequenceItem('finPubs')">+</button>
+            </div>
+
+            <button class="action-btn" style="margin-top: 15px; padding: 8px; font-size: 14px;" onclick="loadObsSourcesForSequences()">🔄 Actualiser les sources OBS</button>
           </div>
         </div>
 
