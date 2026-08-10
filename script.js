@@ -10,18 +10,10 @@ let replayList = []; let replayBufferActive = false; let playQueue = []; let sce
 // --- NOUVEAU GESTIONNAIRE DE SÉQUENCES ---
 let sequences = JSON.parse(localStorage.getItem('obs_sequences'));
 if (!sequences) {
-    // Séquences par défaut si c'est la première fois
     sequences = {
-        mtInfos: [
-            {name: "RESUME", isVideo: false}, {name: "SCORE", isVideo: false}, 
-            {name: "CLASSEMENT-COMPLET", isVideo: false}, {name: "POINTEURS-COMPLET", isVideo: false}
-        ],
-        mtPubs: [
-            {name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}
-        ],
-        finPubs: [
-            {name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}
-        ]
+        mtInfos: [{name: "RESUME", isVideo: false}, {name: "SCORE", isVideo: false}, {name: "CLASSEMENT-COMPLET", isVideo: false}, {name: "POINTEURS-COMPLET", isVideo: false}],
+        mtPubs: [{name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}],
+        finPubs: [{name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}]
     };
     localStorage.setItem('obs_sequences', JSON.stringify(sequences));
 }
@@ -29,8 +21,11 @@ if (!sequences) {
 let seqMode = null; 
 let seqTimeout = null;
 let availableObsSources = [];
+let obsSourcesDetails = {}; 
+let currentSequenceTarget = null;
+let selectedSequenceSources = [];
 
-// États des moteurs
+// États des moteurs de boucles
 let mtState = { phase: 'SPORT', infoIdx: 0, replayIdx: 0, pubIdx: 0, activeSource: null, scene: null };
 let finState = { phase: 'REPLAY', replayIdx: 0, pubIdx: 0, loopCount: 0, startTime: 0, activeSource: null };
 // -----------------------------------------
@@ -71,15 +66,18 @@ function updateTeamName(team, newName) { updateOBSText(team === 'A' ? sourceName
 function directChangeScore(team, delta) { scores[team] = Math.max(0, scores[team] + delta); document.getElementById("score" + team).textContent = scores[team]; updateOBSText(sourceNames[team], scores[team]); }
 function resizeBoxes(delta) { boxSize = Math.max(0, boxSize + delta); document.querySelectorAll(".zone").forEach(zone => { zone.style.padding = boxSize + "px " + (boxSize * 2) + "px"; }); }
 function toggleLayout() { document.body.classList.toggle("horizontal-layout"); }
+
+// CORRECTION BUG BOUCLE INFINIE : On passe false à forceStopReplay pour éviter que ça ne rappelle switchScene
 function switchScene(sceneName) { 
   if (!ensureOBSConnection()) return; 
   if (sceneName !== sourceNames.miTempsScene && sceneName !== sourceNames.miTempsReplayScene && sceneName !== sourceNames.finMatchReplayScene && sceneName !== sourceNames.replayScene) { 
-      forceStopReplay(); // Coupe automatiquement le cycle si on passe au direct
+      forceStopReplay(false); 
   } 
   sendReq("SetCurrentProgramScene", { sceneName: sceneName }); 
   currentLiveScene = sceneName; 
 }
 function triggerGraphic(sourceName) { setSourceVisibility(sourceName, true, sourceNames.sceneName); if (graphicTimeouts[sourceName]) clearTimeout(graphicTimeouts[sourceName]); graphicTimeouts[sourceName] = setTimeout(() => { setSourceVisibility(sourceName, false, sourceNames.sceneName); }, 5000); }
+
 
 // ==========================================
 // MOTEUR DYNAMIQUE : MI-TEMPS & FIN DE MATCH
@@ -103,15 +101,15 @@ function playReplayFile(mediaSource, scene, file) {
     setSourceVisibility(mediaSource, true, scene);
 }
 
-// Lancement de la Mi-Temps Automatique
+// ------ Lancement de la Mi-Temps Automatique ------
 function handleMiTempsClick() { 
-    forceStopReplay(); 
+    forceStopReplay(false); 
     const useReplay = replayBufferActive && replayList.length > 0; 
     seqMode = 'MI_TEMPS'; 
     mtState.scene = useReplay ? sourceNames.miTempsReplayScene : sourceNames.miTempsScene; 
     switchScene(mtState.scene); 
     
-    // On cache tout avant de commencer
+    // On cache TOUT au moment du lancement pour éviter des superpositions
     [...sequences.mtInfos, ...sequences.mtPubs].forEach(s => setSourceVisibility(s.name, false, mtState.scene)); 
     setSourceVisibility(sourceNames.replayMediaMT, false, mtState.scene); 
     
@@ -121,50 +119,54 @@ function handleMiTempsClick() {
     mtState.pubIdx = 0; 
     mtState.activeSource = null; 
     
-    stepMiTemps(); 
+    // Délai de 200ms pour laisser le temps à OBS de tout masquer proprement
+    setTimeout(stepMiTemps, 200); 
 }
 
 function stepMiTemps() { 
     if (seqMode !== 'MI_TEMPS') return; 
+    if (seqTimeout) clearTimeout(seqTimeout);
+    
+    if (sequences.mtInfos.length === 0 && sequences.mtPubs.length === 0) return; // Sécurité anti-freeze
+
     hideActiveSeqSource(mtState); 
     setSourceVisibility(sourceNames.replayMediaMT, false, mtState.scene); 
     
     if (mtState.phase === 'SPORT') { 
         const useReplay = replayBufferActive && replayList.length > 0; 
         
-        // Alternance : Info -> Replay -> Info -> Replay
+        if (sequences.mtInfos.length === 0) {
+            mtState.phase = 'PUB'; mtState.pubIdx = 0;
+            setTimeout(stepMiTemps, 0);
+            return;
+        }
+
         if (mtState.infoIdx === mtState.replayIdx || !useReplay) { 
-            // On joue une info graphique
             if (mtState.infoIdx >= sequences.mtInfos.length) { 
-                // Fin des infos sportives, on passe aux pubs
                 if (sequences.mtPubs.length > 0) { 
-                    mtState.phase = 'PUB'; 
-                    mtState.pubIdx = 0; 
-                    stepMiTemps(); 
+                    mtState.phase = 'PUB'; mtState.pubIdx = 0; 
                 } else { 
-                    // Aucune pub configurée, on boucle les infos sportives
-                    mtState.infoIdx = 0; 
-                    mtState.replayIdx = 0; 
-                    stepMiTemps(); 
+                    mtState.infoIdx = 0; mtState.replayIdx = 0; 
                 } 
+                setTimeout(stepMiTemps, 0); 
                 return; 
             } 
+            
             const item = sequences.mtInfos[mtState.infoIdx]; 
             mtState.activeSource = item.name; 
             setSourceVisibility(item.name, true, mtState.scene); 
             mtState.infoIdx++; 
             
             if (item.isVideo) { 
-                restartMediaSource(item.name); // Attend l'event OBS pour passer à la suite
+                restartMediaSource(item.name); 
+                seqTimeout = setTimeout(() => { stepMiTemps(); }, 180000); // 3 min max sécurité
             } else { 
                 seqTimeout = setTimeout(stepMiTemps, 5000); // 5 sec pour les images
             } 
         } else { 
-            // On joue un Replay
             if (mtState.replayIdx >= replayList.length) { 
-                // Si on a moins de replays que d'infos, on compense l'index
                 mtState.replayIdx = mtState.infoIdx; 
-                stepMiTemps(); 
+                setTimeout(stepMiTemps, 0); 
                 return; 
             } 
             const nextFile = replayList[mtState.replayIdx]; 
@@ -173,13 +175,11 @@ function stepMiTemps() {
         } 
     } else if (mtState.phase === 'PUB') { 
         if (mtState.pubIdx >= sequences.mtPubs.length) { 
-            // Fin du bloc de pub, on relance le cycle sportif
-            mtState.phase = 'SPORT'; 
-            mtState.infoIdx = 0; 
-            mtState.replayIdx = 0; 
-            stepMiTemps(); 
+            mtState.phase = 'SPORT'; mtState.infoIdx = 0; mtState.replayIdx = 0; 
+            setTimeout(stepMiTemps, 0); 
             return; 
         } 
+        
         const item = sequences.mtPubs[mtState.pubIdx]; 
         mtState.activeSource = item.name; 
         setSourceVisibility(item.name, true, mtState.scene); 
@@ -187,15 +187,16 @@ function stepMiTemps() {
         
         if (item.isVideo) { 
             restartMediaSource(item.name); 
+            seqTimeout = setTimeout(() => { stepMiTemps(); }, 180000); 
         } else { 
             seqTimeout = setTimeout(stepMiTemps, 5000); 
         } 
     } 
 }
 
-// Lancement du Générique de Fin de Match (Replays & Pubs)
+// ------ Lancement du Générique de Fin de Match ------
 function startFinMatchReplayCycle() {
-    forceStopReplay(); 
+    forceStopReplay(false); 
     seqMode = 'FIN_MATCH'; 
     finState.scene = sourceNames.finMatchReplayScene; 
     switchScene(finState.scene); 
@@ -210,41 +211,37 @@ function startFinMatchReplayCycle() {
     finState.startTime = Date.now(); 
     finState.activeSource = null; 
     
-    stepFinMatch();
+    setTimeout(stepFinMatch, 200);
 }
 
 function stepFinMatch() {
     if (seqMode !== 'FIN_MATCH') return; 
+    if (seqTimeout) clearTimeout(seqTimeout);
+
+    const useReplay = replayBufferActive && replayList.length > 0;
+    if (!useReplay && sequences.finPubs.length === 0) return;
+
     hideActiveSeqSource(finState); 
     
     if (finState.phase === 'REPLAY') { 
-        const useReplay = replayBufferActive && replayList.length > 0; 
-        
         if (!useReplay) { 
-            // Si pas de replays capturés, on passe directement aux pubs de fin
-            if (sequences.finPubs.length > 0) { 
-                finState.phase = 'PUB'; 
-                finState.pubIdx = 0; 
-                stepFinMatch(); 
-            } 
+            finState.phase = 'PUB'; finState.pubIdx = 0; 
+            setTimeout(stepFinMatch, 0); 
             return; 
         } 
         
-        // VÉRIFICATION TRANQUILLE ENTRE 2 REPLAYS
         const timeElapsed = Date.now() - finState.startTime; 
-        // Si + de 2 minutes de replays OU + de 2 boucles terminées, on envoie la pub !
+        // Lancer les pubs après 2 boucles OU 2 minutes
         if ((timeElapsed > 120000 || finState.loopCount >= 2) && sequences.finPubs.length > 0) { 
-            finState.phase = 'PUB'; 
-            finState.pubIdx = 0; 
+            finState.phase = 'PUB'; finState.pubIdx = 0; 
             setSourceVisibility(sourceNames.replayMediaFin, false, finState.scene); 
-            stepFinMatch(); 
+            setTimeout(stepFinMatch, 0); 
             return; 
         } 
         
         if (finState.replayIdx >= replayList.length) { 
-            finState.replayIdx = 0; 
-            finState.loopCount++; 
-            stepFinMatch(); 
+            finState.replayIdx = 0; finState.loopCount++; 
+            setTimeout(stepFinMatch, 0); 
             return; 
         } 
         
@@ -254,12 +251,9 @@ function stepFinMatch() {
         
     } else if (finState.phase === 'PUB') { 
         if (finState.pubIdx >= sequences.finPubs.length) { 
-            // Fin des pubs, on relance la boucle de replays
-            finState.phase = 'REPLAY'; 
-            finState.startTime = Date.now(); 
-            finState.loopCount = 0; 
-            finState.replayIdx = 0; 
-            stepFinMatch(); 
+            finState.phase = 'REPLAY'; finState.startTime = Date.now(); 
+            finState.loopCount = 0; finState.replayIdx = 0; 
+            setTimeout(stepFinMatch, 0); 
             return; 
         } 
         
@@ -270,6 +264,7 @@ function stepFinMatch() {
         
         if (item.isVideo) { 
             restartMediaSource(item.name); 
+            seqTimeout = setTimeout(() => { stepFinMatch(); }, 180000); 
         } else { 
             seqTimeout = setTimeout(stepFinMatch, 5000); 
         } 
@@ -277,29 +272,58 @@ function stepFinMatch() {
 }
 
 // ----------------------------------------------------
-// UI GESTIONNAIRE DE SÉQUENCES
+// UI GESTIONNAIRE DE SÉQUENCES AVEC DRAG & DROP
 // ----------------------------------------------------
 function toggleSequenceConfig() {
     const content = document.getElementById('sequence-config-content');
     const chevron = document.getElementById('sequence-config-chevron');
     if (content.style.display === 'none') {
         content.style.display = 'block'; chevron.textContent = '▲';
-        if (availableObsSources.length === 0) loadObsSourcesForSequences();
     } else { content.style.display = 'none'; chevron.textContent = '▼'; }
 }
 
 function loadObsSourcesForSequences() {
     availableObsSources = [];
-    sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsScene }, "get_sources_mt");
-    sendReq("GetSceneItemList", { sceneName: sourceNames.finMatchReplayScene }, "get_sources_fin");
+    sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsScene }, "get_sources_:::" + sourceNames.miTempsScene);
+    sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsReplayScene }, "get_sources_:::" + sourceNames.miTempsReplayScene);
+    sendReq("GetSceneItemList", { sceneName: sourceNames.finMatchReplayScene }, "get_sources_:::" + sourceNames.finMatchReplayScene);
 }
 
-function updateSequenceSelects() {
-    const options = '<option value="">-- Sélectionner une source OBS --</option>' + 
-        availableObsSources.sort().map(s => `<option value="${s}">${s}</option>`).join('');
-    document.getElementById('select-mt-infos').innerHTML = options;
-    document.getElementById('select-mt-pubs').innerHTML = options;
-    document.getElementById('select-fin-pubs').innerHTML = options;
+// DRAG & DROP NATIVE HTML5
+let dragSrcEl = null;
+function handleDragStart(e) {
+    dragSrcEl = this;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', JSON.stringify({ index: this.dataset.index, list: this.dataset.list }));
+    this.classList.add('dragging');
+}
+function handleDragOver(e) {
+    if (e.preventDefault) e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+}
+function handleDragEnter(e) { this.classList.add('over'); }
+function handleDragLeave(e) { this.classList.remove('over'); }
+function handleDrop(e) {
+    if (e.stopPropagation) e.stopPropagation();
+    this.classList.remove('over');
+    if (dragSrcEl !== this) {
+        const dragData = JSON.parse(e.dataTransfer.getData('text/plain'));
+        const fromIdx = parseInt(dragData.index);
+        const toIdx = parseInt(this.dataset.index);
+        const listName = dragData.list;
+
+        if (listName === this.dataset.list) {
+            const item = sequences[listName].splice(fromIdx, 1)[0];
+            sequences[listName].splice(toIdx, 0, item);
+            renderSequenceList();
+        }
+    }
+    return false;
+}
+function handleDragEnd(e) {
+    this.classList.remove('dragging');
+    document.querySelectorAll('.seq-item').forEach(el => el.classList.remove('over'));
 }
 
 function renderSequenceList() {
@@ -309,23 +333,86 @@ function renderSequenceList() {
         sequences[listName].forEach((item, idx) => {
             const div = document.createElement('div');
             div.className = 'seq-item' + (item.isVideo ? ' is-video' : '');
-            div.innerHTML = `<span>${item.isVideo ? '🎥' : '🖼️'} ${item.name}</span> <button class="seq-item-del" onclick="deleteSequenceItem('${listName}', ${idx})">❌</button>`;
+            div.draggable = true;
+            div.dataset.index = idx;
+            div.dataset.list = listName;
+            
+            // Events pour Drag & Drop
+            div.addEventListener('dragstart', handleDragStart);
+            div.addEventListener('dragover', handleDragOver);
+            div.addEventListener('dragenter', handleDragEnter);
+            div.addEventListener('dragleave', handleDragLeave);
+            div.addEventListener('drop', handleDrop);
+            div.addEventListener('dragend', handleDragEnd);
+
+            div.innerHTML = `
+                <span style="display:flex; align-items:center; gap:8px;">
+                    <span style="color:#666; font-size:16px;">☰</span> 
+                    ${item.isVideo ? '🎥' : '🖼️'} ${item.name}
+                </span> 
+                <button class="seq-item-del" onclick="deleteSequenceItem('${listName}', ${idx})">❌</button>
+            `;
             container.appendChild(div);
         });
     });
     localStorage.setItem('obs_sequences', JSON.stringify(sequences));
 }
 
-function addSequenceItem(listName) {
-    const selectId = `select-${listName.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
-    const val = document.getElementById(selectId).value;
-    if (!val) return;
-    const isVid = val.toUpperCase().includes('VIDEO');
-    sequences[listName].push({ name: val, isVideo: isVid });
-    renderSequenceList();
+function deleteSequenceItem(listName, idx) { sequences[listName].splice(idx, 1); renderSequenceList(); }
+
+// --- MODALE POUR SÉLECTIONNER LES SOURCES (AVEC BARRE DE RECHERCHE) ---
+function openSequenceModal(listName) {
+    currentSequenceTarget = listName;
+    selectedSequenceSources = [];
+    document.getElementById("sequence-search").value = ""; // Vider la recherche
+    const grid = document.getElementById("sequence-grid");
+    grid.innerHTML = "";
+    
+    let title = "";
+    if (listName === 'mtInfos') title = "Mi-Temps : Infos Sportives";
+    else if (listName === 'mtPubs') title = "Mi-Temps : Pubs & Sponsors";
+    else title = "Fin de Match : Pubs & Sponsors";
+    document.getElementById("sequence-modal-title").innerText = `Sélectionner pour ${title}`;
+
+    availableObsSources.sort().forEach(sourceName => {
+        const btn = document.createElement("button");
+        const isVid = obsSourcesDetails[sourceName]?.isVideo || sourceName.toUpperCase().includes('VIDEO');
+        btn.innerHTML = `${isVid ? '🎥' : '🖼️'} ${sourceName}`;
+        btn.onclick = () => {
+            const idx = selectedSequenceSources.indexOf(sourceName);
+            if (idx > -1) {
+                selectedSequenceSources.splice(idx, 1);
+                btn.style.borderColor = "#666"; btn.style.backgroundColor = "#444";
+            } else {
+                selectedSequenceSources.push(sourceName);
+                btn.style.borderColor = "#1DB954"; btn.style.backgroundColor = "#282828";
+            }
+        };
+        grid.appendChild(btn);
+    });
+    document.getElementById("sequence-modal").style.display = "flex";
 }
 
-function deleteSequenceItem(listName, idx) { sequences[listName].splice(idx, 1); renderSequenceList(); }
+function closeSequenceModal() { document.getElementById("sequence-modal").style.display = "none"; }
+
+function filterSequenceModal() {
+    const filter = document.getElementById('sequence-search').value.toUpperCase();
+    const btns = document.getElementById('sequence-grid').getElementsByTagName('button');
+    for (let i = 0; i < btns.length; i++) {
+        const txt = btns[i].textContent || btns[i].innerText;
+        btns[i].style.display = txt.toUpperCase().indexOf(filter) > -1 ? "" : "none";
+    }
+}
+
+function saveSequenceSelection() {
+    selectedSequenceSources.forEach(sourceName => {
+        const isVid = obsSourcesDetails[sourceName]?.isVideo || sourceName.toUpperCase().includes('VIDEO');
+        sequences[currentSequenceTarget].push({ name: sourceName, isVideo: isVid });
+    });
+    renderSequenceList();
+    closeSequenceModal();
+}
+
 
 // ==========================================
 // SUITE DU CODE ORIGINAL (POPUP BUT, PENALITES, REPLAY MANUEL)
@@ -356,7 +443,7 @@ function submitSelection(selectedValue) { document.getElementById("pool-modal").
 function updateReplayBtnUI() { const btn = document.getElementById("toggleReplayBtn"); const content = document.getElementById("replay-content"); if (replayBufferActive) { btn.textContent = "⏹️ Désactiver le Replay Buffer"; btn.classList.replace("start-btn", "stop-btn"); content.className = "replay-content-active"; } else { btn.textContent = "▶️ Activer le Replay Buffer"; btn.classList.replace("stop-btn", "start-btn"); content.className = "replay-content-hidden"; } }
 function toggleReplayBuffer() { sendReq(replayBufferActive ? "StopReplayBuffer" : "StartReplayBuffer"); }
 function saveReplay() { sendReq("SaveReplayBuffer"); document.getElementById("saveReplayBtn").textContent = "⏳ Capture en cours..."; }
-function playReplays(paths) { if (!ensureOBSConnection() || paths.length === 0) return; forceStopReplay(); playQueue = [...paths]; switchScene(sourceNames.replayScene); setSourceVisibility(sourceNames.replayImageNormal, true, sourceNames.replayScene); playNextVideoContext('NORMAL'); }
+function playReplays(paths) { if (!ensureOBSConnection() || paths.length === 0) return; forceStopReplay(false); playQueue = [...paths]; switchScene(sourceNames.replayScene); setSourceVisibility(sourceNames.replayImageNormal, true, sourceNames.replayScene); playNextVideoContext('NORMAL'); }
 function playNextVideoContext(context) { 
     const mediaSource = sourceNames.replayMediaNormal; const scene = sourceNames.replayScene; 
     if (playQueue.length > 0) { 
@@ -371,6 +458,7 @@ function playNextVideoContext(context) {
 function playLastReplay() { if (replayList.length > 0) { isLoopingAll = false; playReplays([replayList[replayList.length - 1]]); } else alert("Aucune vidéo capturée !"); }
 function playAllReplays() { if (replayList.length > 0) { isLoopingAll = true; playReplays(replayList); } else alert("Liste vide !"); }
 function clearReplays() { replayList = []; playQueue = []; document.getElementById("replayCount").innerText = "0"; document.getElementById("deleteBtn").textContent = "✅ Vidé !"; setTimeout(() => { document.getElementById("deleteBtn").textContent = "🗑️ Vider la liste"; }, 1500); }
+
 function hideReplayOnStream(context = 'NORMAL') { 
     const mediaSource = sourceNames.replayMediaNormal; const scene = sourceNames.replayScene; 
     playQueue = []; isLoopingAll = false; 
@@ -379,7 +467,9 @@ function hideReplayOnStream(context = 'NORMAL') {
     setSourceVisibility(sourceNames.replayImageNormal, false, scene); 
     if (currentLiveScene === sourceNames.replayScene) switchScene(sourceNames.sceneName); 
 }
-function forceStopReplay() { 
+
+// CORRECTION BUG BOUCLE INFINIE : On passe un argument pour savoir s'il faut changer de scène ou pas
+function forceStopReplay(switchBack = true) { 
     playQueue = []; isLoopingAll = false; seqMode = null; clearTimeout(seqTimeout); 
     sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaNormal, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); 
     sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaFin, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); 
@@ -389,9 +479,14 @@ function forceStopReplay() {
     [...sequences.mtInfos, ...sequences.mtPubs].forEach(item => { setSourceVisibility(item.name, false, sourceNames.miTempsScene); setSourceVisibility(item.name, false, sourceNames.miTempsReplayScene); });
     sequences.finPubs.forEach(item => { setSourceVisibility(item.name, false, sourceNames.finMatchReplayScene); });
 
-    if (currentLiveScene === sourceNames.replayScene) { setSourceVisibility(sourceNames.replayImageNormal, false, sourceNames.replayScene); switchScene(sourceNames.sceneName); } 
-    else if (currentLiveScene === sourceNames.finMatchReplayScene) { switchScene(sourceNames.finMatchScene); } 
-    else if (currentLiveScene === sourceNames.miTempsReplayScene || currentLiveScene === sourceNames.miTempsScene) { switchScene(sourceNames.sceneName); } 
+    // Si le bouton "Forcer l'arrêt" a été cliqué, on force le retour à la scène d'avant
+    if (switchBack) {
+        if (currentLiveScene === sourceNames.replayScene) { setSourceVisibility(sourceNames.replayImageNormal, false, sourceNames.replayScene); switchScene(sourceNames.sceneName); } 
+        else if (currentLiveScene === sourceNames.finMatchReplayScene) { switchScene(sourceNames.finMatchScene); } 
+        else if (currentLiveScene === sourceNames.miTempsReplayScene || currentLiveScene === sourceNames.miTempsScene) { switchScene(sourceNames.sceneName); } 
+    } else {
+        setSourceVisibility(sourceNames.replayImageNormal, false, sourceNames.replayScene);
+    }
 }
 
 function sendReq(type, data = {}, reqId = null) { if (!ensureOBSConnection()) return; obs.send(JSON.stringify({ op: 6, d: { requestType: type, requestId: reqId || (type + Date.now()), requestData: data } })); }
@@ -400,7 +495,13 @@ function connectOBS() {
     obs.onmessage = (event) => {
         const p = JSON.parse(event.data);
         if (p.op === 0) obs.send(JSON.stringify({ op: 1, d: { rpcVersion: 1 } }));
-        else if (p.op === 2) { console.log("✅ Connecté à OBS"); updateOBSText(sourceNames.C, obsPeriodStates[currentPeriodIndex]); syncTimerDisplayAndOBS(); updatePenaltyOBSText(); sendReq("GetReplayBufferStatus", {}, "init-replay-status"); } 
+        else if (p.op === 2) { 
+            console.log("✅ Connecté à OBS"); 
+            updateOBSText(sourceNames.C, obsPeriodStates[currentPeriodIndex]); syncTimerDisplayAndOBS(); updatePenaltyOBSText(); sendReq("GetReplayBufferStatus", {}, "init-replay-status"); 
+            
+            // CORRECTION ECRAN NOIR : On charge toutes les sources OBS discrètement au démarrage pour les mettre en cache
+            loadObsSourcesForSequences();
+        } 
         else if (p.op === 5) {
             const t = p.d.eventType; const d = p.d.eventData;
             if (t === "ReplayBufferStateChanged") { replayBufferActive = d.outputActive; updateReplayBtnUI(); } 
@@ -420,8 +521,14 @@ function connectOBS() {
             if (p.d.requestId === "init-replay-status") { replayBufferActive = p.d.responseData.outputActive; updateReplayBtnUI(); } 
             else if (p.d.requestId.startsWith("getid:::")) { const pts = p.d.requestId.split(":::"); sceneItemIds[pts[1] + ":::" + pts[2]] = p.d.responseData.sceneItemId; sendReq("SetSceneItemEnabled", { sceneName: pts[1], sceneItemId: p.d.responseData.sceneItemId, sceneItemEnabled: pts[3] === "true" }); }
             else if (p.d.requestId.startsWith("get_sources_")) {
-                p.d.responseData.sceneItems.forEach(item => { if (!availableObsSources.includes(item.sourceName)) availableObsSources.push(item.sourceName); });
-                updateSequenceSelects();
+                const sceneName = p.d.requestId.split(":::")[1];
+                p.d.responseData.sceneItems.forEach(item => { 
+                    const isVid = item.sourceName.toUpperCase().includes("VIDEO") || item.sourceKind === "ffmpeg_source";
+                    obsSourcesDetails[item.sourceName] = { isVideo: isVid };
+                    if (!availableObsSources.includes(item.sourceName)) availableObsSources.push(item.sourceName);
+                    // On met en cache tous les IDs des sources dès le lancement, ce qui supprime le temps de latence au changement de scène !
+                    sceneItemIds[sceneName + ":::" + item.sourceName] = item.sceneItemId;
+                });
             }
         }
     };

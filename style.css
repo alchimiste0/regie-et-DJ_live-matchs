@@ -84,7 +84,7 @@ body.horizontal-layout #main-dashboard {
   grid-template-areas:
     "rolskanet rolskanet rolskanet"
     "timer period scenes"
-    "sequence sequence sequence" /* Nouvelle zone gérée par la grille */
+    "sequence sequence sequence"
     "scoreB graphics scoreA"
     "replay replay replay"
     "spotify spotify spotify";
@@ -97,7 +97,7 @@ body.horizontal-layout .zone { padding: 15px 25px; }
 #timer-control { grid-area: timer; }
 #period-control { grid-area: period; }
 #scene-control { grid-area: scenes; }
-#sequence-control { grid-area: sequence; } /* Affectation CSS de la nouvelle zone */
+#sequence-control { grid-area: sequence; }
 #graphic-control { grid-area: graphics; }
 #replay-control { grid-area: replay; }
 #score-b-control { grid-area: scoreB; }
@@ -303,23 +303,18 @@ button:hover { filter: brightness(1.2); }
 /* --- GESTIONNAIRE DE SÉQUENCES (PUBS/INFOS) --- */
 .sequence-zone { background: #2c2518; border: 2px solid #ffc107; }
 .seq-title { font-size: 14px; margin: 0 0 5px 0; color: #ccc; border-bottom: 1px solid #444; padding-bottom: 3px; }
-.seq-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+.seq-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px; }
 .seq-item { 
   display: flex; justify-content: space-between; align-items: center; 
-  background: #1a1a1a; padding: 6px 10px; border-radius: 4px; font-size: 13px; font-weight: bold;
-  border-left: 3px solid #ffc107;
+  background: #1a1a1a; padding: 8px 10px; border-radius: 4px; font-size: 13px; font-weight: bold;
+  border-left: 3px solid #ffc107; cursor: grab; /* Curseur glisser */
 }
-.seq-item.is-video { border-left-color: #17a2b8; } /* Différencier visuellement les vidéos */
-.seq-item-del { background: transparent; border: none; color: #dc3545; font-size: 16px; cursor: pointer; padding: 0; }
+.seq-item:active { cursor: grabbing; } /* Curseur pendant le clic */
+.seq-item.is-video { border-left-color: #17a2b8; } 
+.seq-item.dragging { opacity: 0.5; border: 1px dashed #1DB954; } /* Style pendant le glissement */
+.seq-item.over { border-top: 3px solid #1DB954; padding-top: 15px; } /* Ligne verte pour la zone de dépôt */
+
+.seq-item-del { background: transparent; border: none; color: #dc3545; font-size: 16px; cursor: pointer; padding: 0 5px;}
 .seq-item-del:hover { color: #ff4d4d; transform: scale(1.1); }
-.seq-add-row { display: flex; gap: 5px; align-items: center; }
-.seq-add-row select { 
-  flex: 1; padding: 6px; background-color: #404040; color: white; 
-  border: 1px solid #555; border-radius: 4px; font-size: 13px; 
-}
-.seq-add-row select:focus { outline: 1px solid #ffc107; }
-.seq-add-row button { 
-  background: #ffc107; color: black; font-weight: bold; border-radius: 4px; 
-  padding: 6px 12px; font-size: 16px; border: none; cursor: pointer;
-}
-.seq-add-row button:hover { filter: brightness(1.1); }
+.seq-add-btn { background: #282828; color: white; width: 100%; border: 1px dashed #ffc107; font-size: 13px; padding: 8px; border-radius: 4px; cursor: pointer; transition: 0.2s;}
+.seq-add-btn:hover { background: #404040; border-color: #1DB954; }

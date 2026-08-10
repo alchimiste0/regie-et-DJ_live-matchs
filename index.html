@@ -148,32 +148,21 @@
           </div>
           
           <div id="sequence-config-content" style="display: none; margin-top: 15px; text-align: left;">
+            <p style="font-size: 12px; color: #888; margin-top: 0; margin-bottom: 15px;">Glissez-déposez (Drag & Drop) les éléments pour changer leur ordre.</p>
             
-            <!-- MI-TEMPS : INFOS SPORTIVES -->
             <h3 class="seq-title">Mi-Temps : Infos (5 sec)</h3>
             <div id="list-mt-infos" class="seq-list"></div>
-            <div class="seq-add-row">
-              <select id="select-mt-infos"><option value="">Chargement d'OBS...</option></select>
-              <button onclick="addSequenceItem('mtInfos')">+</button>
-            </div>
+            <button class="seq-add-btn" onclick="openSequenceModal('mtInfos')">➕ Ajouter des sources</button>
 
-            <!-- MI-TEMPS : PUBS & SPONSORS -->
             <h3 class="seq-title" style="margin-top: 15px;">Mi-Temps : Pubs & Sponsors</h3>
             <div id="list-mt-pubs" class="seq-list"></div>
-            <div class="seq-add-row">
-              <select id="select-mt-pubs"><option value="">Chargement d'OBS...</option></select>
-              <button onclick="addSequenceItem('mtPubs')">+</button>
-            </div>
+            <button class="seq-add-btn" onclick="openSequenceModal('mtPubs')">➕ Ajouter des sources</button>
 
-            <!-- FIN DE MATCH : PUBS & SPONSORS -->
             <h3 class="seq-title" style="margin-top: 15px;">Fin de match : Pubs & Sponsors</h3>
             <div id="list-fin-pubs" class="seq-list"></div>
-            <div class="seq-add-row">
-              <select id="select-fin-pubs"><option value="">Chargement d'OBS...</option></select>
-              <button onclick="addSequenceItem('finPubs')">+</button>
-            </div>
+            <button class="seq-add-btn" onclick="openSequenceModal('finPubs')">➕ Ajouter des sources</button>
 
-            <button class="action-btn" style="margin-top: 15px; padding: 8px; font-size: 14px;" onclick="loadObsSourcesForSequences()">🔄 Actualiser les sources OBS</button>
+            <button class="action-btn" style="margin-top: 20px; padding: 8px; font-size: 14px; background: #333; color: white; border: 1px solid #555;" onclick="loadObsSourcesForSequences()">🔄 Forcer l'actualisation des sources OBS</button>
           </div>
         </div>
 
@@ -198,7 +187,7 @@
             <div class="replay-buttons-grid">
               <button class="play-btn" onclick="playLastReplay()">⏪ Revoir le dernier</button>
               <button class="play-all-btn" onclick="playAllReplays()">🎞️ Revoir tout</button>
-              <button class="stop-btn" onclick="hideReplayOnStream()">❌ Forcer l'arrêt</button>
+              <button class="stop-btn" onclick="forceStopReplay(true)">❌ Forcer l'arrêt</button>
               <button id="deleteBtn" class="delete-btn" onclick="clearReplays()">🗑️ Vider la liste</button>
             </div>
             <div style="margin-top: 10px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;">
@@ -342,6 +331,17 @@
       <h3 style="color: #1DB954;">🎵 Autres Sons</h3>
       <div id="spotify-extra-grid" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; margin-bottom: 20px;"></div>
       <button class="modal-close-btn" onclick="closeSpotifyExtraModal()">Fermer</button>
+    </div>
+  </div>
+
+  <!-- NOUVELLE MODALE POUR AJOUTER DES SOURCES OBS AVEC BARRE DE RECHERCHE -->
+  <div id="sequence-modal" class="modal">
+    <div class="modal-content" style="max-width: 700px;">
+      <h3 id="sequence-modal-title">Ajouter des sources</h3>
+      <input type="text" id="sequence-search" placeholder="🔍 Rechercher une source..." onkeyup="filterSequenceModal()" style="width: 100%; padding: 10px; margin-bottom: 15px; background: #222; border: 1px solid #555; color: white; border-radius: 4px; font-size: 15px; font-family: sans-serif;">
+      <div id="sequence-grid" class="player-grid" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); max-height: 400px; overflow-y: auto;"></div>
+      <button class="action-btn" style="margin-top:15px; background-color: #1DB954; color: white;" onclick="saveSequenceSelection()">✅ Valider la sélection</button>
+      <button class="modal-close-btn" style="margin-top:10px;" onclick="closeSequenceModal()">Annuler</button>
     </div>
   </div>
 
