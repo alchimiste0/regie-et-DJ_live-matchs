@@ -7,13 +7,33 @@ let penalties = { A: [], B: [] };
 
 let replayList = []; let replayBufferActive = false; let playQueue = []; let sceneItemIds = {}; let currentLiveScene = "LIVE"; let isLoopingAll = false; 
 
-// --- NOUVEAU GESTIONNAIRE DE SÉQUENCES ---
+// --- GESTIONNAIRE DE SÉQUENCES ---
 let sequences = JSON.parse(localStorage.getItem('obs_sequences'));
 if (!sequences) {
     sequences = {
-        mtInfos: [{name: "RESUME", isVideo: false}, {name: "SCORE", isVideo: false}, {name: "CLASSEMENT-COMPLET", isVideo: false}, {name: "POINTEURS-COMPLET", isVideo: false}],
-        mtPubs: [{name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}],
-        finPubs: [{name: "PUBLICITE1", isVideo: false}, {name: "PUBLICITE2", isVideo: false}, {name: "SPONSORS", isVideo: false}]
+        mtInfos: [
+            {name: "RESUME", isVideo: false}, 
+            {name: "SCORES_DIRECT", isVideo: false}, 
+            {name: "SCORE", isVideo: false}, 
+            {name: "CLASSEMENT-COMPLET", isVideo: false}, 
+            {name: "POINTEURS-COMPLET", isVideo: false}
+        ],
+        mtPubs: [
+            {name: "SPONSORS", isVideo: false}, 
+            {name: "SPONSORS_2", isVideo: false}, 
+            // 🍔 POUR AJOUTER MCDO PLUS TARD : Enlève les // au début de la ligne ci-dessous
+            // {name: "VIDEO_PUB_MCDO", isVideo: true}, 
+            {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
+            {name: "VIDEO_PUB_Story", isVideo: true}
+        ],
+        finPubs: [
+            {name: "SPONSORS", isVideo: false}, 
+            {name: "SPONSORS_2", isVideo: false}, 
+            // 🍔 POUR AJOUTER MCDO PLUS TARD : Enlève les // au début de la ligne ci-dessous
+            // {name: "VIDEO_PUB_MCDO", isVideo: true}, 
+            {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
+            {name: "VIDEO_PUB_Story", isVideo: true}
+        ]
     };
     localStorage.setItem('obs_sequences', JSON.stringify(sequences));
 }
@@ -100,7 +120,7 @@ function playReplayFile(mediaSource, scene, file) {
     setSourceVisibility(mediaSource, true, scene);
 }
 
-// ------ Lancement de la Mi-Temps Automatique (NOUVEAU MOTEUR FILE D'ATTENTE) ------
+// ------ Lancement de la Mi-Temps Automatique ------
 function handleMiTempsClick() { 
     forceStopReplay(false); 
     const useReplay = replayBufferActive && replayList.length > 0; 
@@ -128,21 +148,18 @@ function stepMiTemps() {
 
     const useReplay = replayBufferActive && replayList.length > 0;
     
-    // Sécurité : S'il n'y a absolument rien à diffuser, on annule pour ne pas freezer
     if (sequences.mtInfos.length === 0 && sequences.mtPubs.length === 0 && !useReplay) return;
 
-    // 1. GÉNÉRATION DE LA FILE D'ATTENTE (Si elle est vide, on crée la boucle)
     if (!mtState.queue || mtState.queue.length === 0) {
         mtState.queue = [];
         
         if (!useReplay) {
-            // MODE SANS REPLAY : Toutes les infos > Toutes les pubs
             sequences.mtInfos.forEach(info => mtState.queue.push({ type: 'INFO', item: info }));
             sequences.mtPubs.forEach(pub => mtState.queue.push({ type: 'PUB', item: pub }));
         } else {
-            // MODE AVEC REPLAY : Intercalé (Info > Pub > Replay) puis Toutes les pubs à la fin
             let maxSlots = sequences.mtInfos.length > 0 ? sequences.mtInfos.length : 1;
-            let replaysPerSlot = Math.ceil(replayList.length / maxSlots);
+            // ICI LE NOUVEAU CALCUL : Minimum 3 replays par bloc (si disponibles)
+            let replaysPerSlot = Math.max(3, Math.ceil(replayList.length / maxSlots));
             
             let replayIndex = 0;
             let pubIndex = 0;
@@ -163,13 +180,11 @@ function stepMiTemps() {
                 }
             }
             
-            // On balance le bloc complet des pubs à la fin de la boucle
             sequences.mtPubs.forEach(pub => mtState.queue.push({ type: 'PUB', item: pub }));
         }
     }
 
-    // 2. LECTURE DE L'ÉLÉMENT SUIVANT DANS LA FILE
-    const currentTask = mtState.queue.shift(); // Récupère le premier élément et le retire de la liste
+    const currentTask = mtState.queue.shift(); 
     
     if (currentTask.type === 'INFO' || currentTask.type === 'PUB') {
         const item = currentTask.item;
@@ -178,14 +193,14 @@ function stepMiTemps() {
         
         if (item.isVideo) {
             restartMediaSource(item.name);
-            seqTimeout = setTimeout(() => { stepMiTemps(); }, 180000); // Timeout 3 min pour les vidéos info/pub
+            seqTimeout = setTimeout(() => { stepMiTemps(); }, 180000); 
         } else {
-            seqTimeout = setTimeout(stepMiTemps, 5000); // 5 sec pour les images fixes
+            seqTimeout = setTimeout(stepMiTemps, 5000); 
         }
     } 
     else if (currentTask.type === 'REPLAY') {
         playReplayFile(sourceNames.replayMediaMT, mtState.scene, currentTask.file);
-        seqTimeout = setTimeout(() => { stepMiTemps(); }, 30000); // Timeout 30 sec max de sécurité pour les ralentis
+        seqTimeout = setTimeout(() => { stepMiTemps(); }, 30000); 
     }
 }
 
@@ -408,10 +423,44 @@ function saveSequenceSelection() {
 
 
 // ==========================================
-// SUITE DU CODE ORIGINAL (POPUP BUT, PENALITES, REPLAY MANUEL)
+// SYSTEME DE FILE D'ATTENTE POUR LES POPUPS (OVERLAY)
 // ==========================================
 
-let currentModalAction = null; let currentModalTeam = null; let currentModalDuration = null; let overlayDisplayTimeout = null;
+let currentModalAction = null; let currentModalTeam = null; let currentModalDuration = null;
+let overlayQueue = [];
+let isOverlayActive = false;
+
+function processOverlayQueue() {
+    // Si un bandeau est déjà en cours ou qu'il n'y a rien à afficher, on s'arrête.
+    if (isOverlayActive || overlayQueue.length === 0) return;
+    
+    isOverlayActive = true;
+    const text = overlayQueue.shift(); // On prend le prochain bandeau
+    
+    // 1. Apparition du bandeau
+    updateOBSText(sourceNames.overlayName, text);
+    setSourceVisibility(sourceNames.overlayImage, true, sourceNames.sceneName);
+    setSourceVisibility(sourceNames.overlayName, true, sourceNames.sceneName);
+    
+    // 2. Disparition après 6 secondes
+    setTimeout(() => {
+        setSourceVisibility(sourceNames.overlayImage, false, sourceNames.sceneName);
+        setSourceVisibility(sourceNames.overlayName, false, sourceNames.sceneName);
+        
+        // 3. Pause d'1 seconde pour laisser le temps à l'animation de sortie (Fade) de se terminer sur OBS
+        setTimeout(() => {
+            isOverlayActive = false;
+            processOverlayQueue(); // On relance pour voir s'il y en a un autre en attente
+        }, 1000);
+        
+    }, 6000);
+}
+
+function triggerOverlay(text) { 
+    overlayQueue.push(text.toUpperCase());
+    processOverlayQueue();
+}
+
 function promptGoal(team) { openPlayerModal('BUT', team, null); }
 function openPlayerModal(action, team, penaltyDuration) {
     currentModalAction = action; currentModalTeam = team; currentModalDuration = penaltyDuration;
@@ -427,7 +476,6 @@ function closePlayerModal() { document.getElementById("player-modal").style.disp
 function submitPlayerAction(nom, num) { closePlayerModal(); const overlayText = `${currentModalAction} - ${nom} ${num ? `n°${num}` : ""}`.trim(); if (currentModalAction === 'BUT') directChangeScore(currentModalTeam, 1); else if (currentModalAction === 'PEN') { penalties[currentModalTeam].push({ id: Date.now(), timeRemaining: currentModalDuration * 60 }); renderPenalties(); updatePenaltyOBSText(); } triggerOverlay(overlayText); }
 function submitTimeoutAction(teamName) { closePlayerModal(); if (timerInterval) stopTimer(); triggerOverlay(`TEMPS MORT - ${teamName}`); }
 function promptPenalty(team, duration) { openPlayerModal('PEN', team, duration); }
-function triggerOverlay(text) { updateOBSText(sourceNames.overlayName, text.toUpperCase()); setSourceVisibility(sourceNames.overlayImage, true, sourceNames.sceneName); setSourceVisibility(sourceNames.overlayName, true, sourceNames.sceneName); clearTimeout(overlayDisplayTimeout); overlayDisplayTimeout = setTimeout(() => { setSourceVisibility(sourceNames.overlayImage, false, sourceNames.sceneName); setSourceVisibility(sourceNames.overlayName, false, sourceNames.sceneName); }, 6000); }
 
 function openSelectionModal(title, options) { document.getElementById("pool-modal-title").innerText = title; const grid = document.getElementById("pool-grid"); grid.innerHTML = ""; options.forEach(opt => { const btn = document.createElement("button"); btn.innerHTML = `<b style="font-size:16px;">${opt.label}</b>`; btn.style.padding = "15px 5px"; if(opt.color) { btn.style.backgroundColor = opt.color; btn.style.gridColumn = "1 / -1"; } btn.onclick = () => submitSelection(opt.value); grid.appendChild(btn); }); document.getElementById("pool-modal").style.display = "flex"; document.getElementById("rolskanet-status").innerText = "⏳ En attente de la sélection..."; }
 function closePoolModal() { document.getElementById("pool-modal").style.display = "none"; pendingSelectionData = null; pendingSelectionType = null; document.getElementById("rolskanet-status").innerText = "❌ Import annulé."; }
