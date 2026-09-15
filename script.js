@@ -26,7 +26,7 @@ let currentSequenceTarget = null;
 let selectedSequenceSources = [];
 
 // États des moteurs de boucles
-let mtState = { phase: 'SPORT', infoIdx: 0, replayIdx: 0, pubIdx: 0, activeSource: null, scene: null };
+let mtState = { queue: [], activeSource: null, scene: null };
 let finState = { phase: 'REPLAY', replayIdx: 0, pubIdx: 0, loopCount: 0, startTime: 0, activeSource: null };
 // -----------------------------------------
 
@@ -67,7 +67,6 @@ function directChangeScore(team, delta) { scores[team] = Math.max(0, scores[team
 function resizeBoxes(delta) { boxSize = Math.max(0, boxSize + delta); document.querySelectorAll(".zone").forEach(zone => { zone.style.padding = boxSize + "px " + (boxSize * 2) + "px"; }); }
 function toggleLayout() { document.body.classList.toggle("horizontal-layout"); }
 
-// CORRECTION BUG BOUCLE INFINIE : On passe false à forceStopReplay pour éviter que ça ne rappelle switchScene
 function switchScene(sceneName) { 
   if (!ensureOBSConnection()) return; 
   if (sceneName !== sourceNames.miTempsScene && sceneName !== sourceNames.miTempsReplayScene && sceneName !== sourceNames.finMatchReplayScene && sceneName !== sourceNames.replayScene) { 
@@ -101,7 +100,7 @@ function playReplayFile(mediaSource, scene, file) {
     setSourceVisibility(mediaSource, true, scene);
 }
 
-// ------ Lancement de la Mi-Temps Automatique ------
+// ------ Lancement de la Mi-Temps Automatique (NOUVEAU MOTEUR FILE D'ATTENTE) ------
 function handleMiTempsClick() { 
     forceStopReplay(false); 
     const useReplay = replayBufferActive && replayList.length > 0; 
@@ -113,10 +112,7 @@ function handleMiTempsClick() {
     [...sequences.mtInfos, ...sequences.mtPubs].forEach(s => setSourceVisibility(s.name, false, mtState.scene)); 
     setSourceVisibility(sourceNames.replayMediaMT, false, mtState.scene); 
     
-    mtState.phase = 'SPORT'; 
-    mtState.infoIdx = 0; 
-    mtState.replayIdx = 0; 
-    mtState.pubIdx = 0; 
+    mtState.queue = []; 
     mtState.activeSource = null; 
     
     // Délai de 200ms pour laisser le temps à OBS de tout masquer proprement
@@ -127,72 +123,72 @@ function stepMiTemps() {
     if (seqMode !== 'MI_TEMPS') return; 
     if (seqTimeout) clearTimeout(seqTimeout);
     
-    if (sequences.mtInfos.length === 0 && sequences.mtPubs.length === 0) return; // Sécurité anti-freeze
-
     hideActiveSeqSource(mtState); 
     setSourceVisibility(sourceNames.replayMediaMT, false, mtState.scene); 
-    
-    if (mtState.phase === 'SPORT') { 
-        const useReplay = replayBufferActive && replayList.length > 0; 
-        
-        if (sequences.mtInfos.length === 0) {
-            mtState.phase = 'PUB'; mtState.pubIdx = 0;
-            setTimeout(stepMiTemps, 0);
-            return;
-        }
 
-        if (mtState.infoIdx === mtState.replayIdx || !useReplay) { 
-            if (mtState.infoIdx >= sequences.mtInfos.length) { 
-                if (sequences.mtPubs.length > 0) { 
-                    mtState.phase = 'PUB'; mtState.pubIdx = 0; 
-                } else { 
-                    mtState.infoIdx = 0; mtState.replayIdx = 0; 
-                } 
-                setTimeout(stepMiTemps, 0); 
-                return; 
-            } 
-            
-            const item = sequences.mtInfos[mtState.infoIdx]; 
-            mtState.activeSource = item.name; 
-            setSourceVisibility(item.name, true, mtState.scene); 
-            mtState.infoIdx++; 
-            
-            if (item.isVideo) { 
-                restartMediaSource(item.name); 
-                seqTimeout = setTimeout(() => { stepMiTemps(); }, 180000); // 3 min max sécurité
-            } else { 
-                seqTimeout = setTimeout(stepMiTemps, 5000); // 5 sec pour les images
-            } 
-        } else { 
-            if (mtState.replayIdx >= replayList.length) { 
-                mtState.replayIdx = mtState.infoIdx; 
-                setTimeout(stepMiTemps, 0); 
-                return; 
-            } 
-            const nextFile = replayList[mtState.replayIdx]; 
-            mtState.replayIdx++; 
-            playReplayFile(sourceNames.replayMediaMT, mtState.scene, nextFile); 
-        } 
-    } else if (mtState.phase === 'PUB') { 
-        if (mtState.pubIdx >= sequences.mtPubs.length) { 
-            mtState.phase = 'SPORT'; mtState.infoIdx = 0; mtState.replayIdx = 0; 
-            setTimeout(stepMiTemps, 0); 
-            return; 
-        } 
+    const useReplay = replayBufferActive && replayList.length > 0;
+    
+    // Sécurité : S'il n'y a absolument rien à diffuser, on annule pour ne pas freezer
+    if (sequences.mtInfos.length === 0 && sequences.mtPubs.length === 0 && !useReplay) return;
+
+    // 1. GÉNÉRATION DE LA FILE D'ATTENTE (Si elle est vide, on crée la boucle)
+    if (!mtState.queue || mtState.queue.length === 0) {
+        mtState.queue = [];
         
-        const item = sequences.mtPubs[mtState.pubIdx]; 
-        mtState.activeSource = item.name; 
-        setSourceVisibility(item.name, true, mtState.scene); 
-        mtState.pubIdx++; 
+        if (!useReplay) {
+            // MODE SANS REPLAY : Toutes les infos > Toutes les pubs
+            sequences.mtInfos.forEach(info => mtState.queue.push({ type: 'INFO', item: info }));
+            sequences.mtPubs.forEach(pub => mtState.queue.push({ type: 'PUB', item: pub }));
+        } else {
+            // MODE AVEC REPLAY : Intercalé (Info > Pub > Replay) puis Toutes les pubs à la fin
+            let maxSlots = sequences.mtInfos.length > 0 ? sequences.mtInfos.length : 1;
+            let replaysPerSlot = Math.ceil(replayList.length / maxSlots);
+            
+            let replayIndex = 0;
+            let pubIndex = 0;
+            
+            for (let i = 0; i < maxSlots; i++) {
+                if (i < sequences.mtInfos.length) {
+                    mtState.queue.push({ type: 'INFO', item: sequences.mtInfos[i] });
+                }
+                if (sequences.mtPubs.length > 0) {
+                    mtState.queue.push({ type: 'PUB', item: sequences.mtPubs[pubIndex % sequences.mtPubs.length] });
+                    pubIndex++;
+                }
+                for (let r = 0; r < replaysPerSlot; r++) {
+                    if (replayIndex < replayList.length) {
+                        mtState.queue.push({ type: 'REPLAY', file: replayList[replayIndex] });
+                        replayIndex++;
+                    }
+                }
+            }
+            
+            // On balance le bloc complet des pubs à la fin de la boucle
+            sequences.mtPubs.forEach(pub => mtState.queue.push({ type: 'PUB', item: pub }));
+        }
+    }
+
+    // 2. LECTURE DE L'ÉLÉMENT SUIVANT DANS LA FILE
+    const currentTask = mtState.queue.shift(); // Récupère le premier élément et le retire de la liste
+    
+    if (currentTask.type === 'INFO' || currentTask.type === 'PUB') {
+        const item = currentTask.item;
+        mtState.activeSource = item.name;
+        setSourceVisibility(item.name, true, mtState.scene);
         
-        if (item.isVideo) { 
-            restartMediaSource(item.name); 
-            seqTimeout = setTimeout(() => { stepMiTemps(); }, 180000); 
-        } else { 
-            seqTimeout = setTimeout(stepMiTemps, 5000); 
-        } 
+        if (item.isVideo) {
+            restartMediaSource(item.name);
+            seqTimeout = setTimeout(() => { stepMiTemps(); }, 180000); // Timeout 3 min pour les vidéos info/pub
+        } else {
+            seqTimeout = setTimeout(stepMiTemps, 5000); // 5 sec pour les images fixes
+        }
     } 
+    else if (currentTask.type === 'REPLAY') {
+        playReplayFile(sourceNames.replayMediaMT, mtState.scene, currentTask.file);
+        seqTimeout = setTimeout(() => { stepMiTemps(); }, 30000); // Timeout 30 sec max de sécurité pour les ralentis
+    }
 }
+
 
 // ------ Lancement du Générique de Fin de Match ------
 function startFinMatchReplayCycle() {
@@ -289,7 +285,6 @@ function loadObsSourcesForSequences() {
     sendReq("GetSceneItemList", { sceneName: sourceNames.finMatchReplayScene }, "get_sources_:::" + sourceNames.finMatchReplayScene);
 }
 
-// DRAG & DROP NATIVE HTML5
 let dragSrcEl = null;
 function handleDragStart(e) {
     dragSrcEl = this;
@@ -337,7 +332,6 @@ function renderSequenceList() {
             div.dataset.index = idx;
             div.dataset.list = listName;
             
-            // Events pour Drag & Drop
             div.addEventListener('dragstart', handleDragStart);
             div.addEventListener('dragover', handleDragOver);
             div.addEventListener('dragenter', handleDragEnter);
@@ -360,11 +354,10 @@ function renderSequenceList() {
 
 function deleteSequenceItem(listName, idx) { sequences[listName].splice(idx, 1); renderSequenceList(); }
 
-// --- MODALE POUR SÉLECTIONNER LES SOURCES (AVEC BARRE DE RECHERCHE) ---
 function openSequenceModal(listName) {
     currentSequenceTarget = listName;
     selectedSequenceSources = [];
-    document.getElementById("sequence-search").value = ""; // Vider la recherche
+    document.getElementById("sequence-search").value = ""; 
     const grid = document.getElementById("sequence-grid");
     grid.innerHTML = "";
     
@@ -468,7 +461,6 @@ function hideReplayOnStream(context = 'NORMAL') {
     if (currentLiveScene === sourceNames.replayScene) switchScene(sourceNames.sceneName); 
 }
 
-// CORRECTION BUG BOUCLE INFINIE : On passe un argument pour savoir s'il faut changer de scène ou pas
 function forceStopReplay(switchBack = true) { 
     playQueue = []; isLoopingAll = false; seqMode = null; clearTimeout(seqTimeout); 
     sendReq("TriggerMediaInputAction", { inputName: sourceNames.replayMediaNormal, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" }); 
@@ -479,7 +471,6 @@ function forceStopReplay(switchBack = true) {
     [...sequences.mtInfos, ...sequences.mtPubs].forEach(item => { setSourceVisibility(item.name, false, sourceNames.miTempsScene); setSourceVisibility(item.name, false, sourceNames.miTempsReplayScene); });
     sequences.finPubs.forEach(item => { setSourceVisibility(item.name, false, sourceNames.finMatchReplayScene); });
 
-    // Si le bouton "Forcer l'arrêt" a été cliqué, on force le retour à la scène d'avant
     if (switchBack) {
         if (currentLiveScene === sourceNames.replayScene) { setSourceVisibility(sourceNames.replayImageNormal, false, sourceNames.replayScene); switchScene(sourceNames.sceneName); } 
         else if (currentLiveScene === sourceNames.finMatchReplayScene) { switchScene(sourceNames.finMatchScene); } 
@@ -498,8 +489,6 @@ function connectOBS() {
         else if (p.op === 2) { 
             console.log("✅ Connecté à OBS"); 
             updateOBSText(sourceNames.C, obsPeriodStates[currentPeriodIndex]); syncTimerDisplayAndOBS(); updatePenaltyOBSText(); sendReq("GetReplayBufferStatus", {}, "init-replay-status"); 
-            
-            // CORRECTION ECRAN NOIR : On charge toutes les sources OBS discrètement au démarrage pour les mettre en cache
             loadObsSourcesForSequences();
         } 
         else if (p.op === 5) {
@@ -526,7 +515,6 @@ function connectOBS() {
                     const isVid = item.sourceName.toUpperCase().includes("VIDEO") || item.sourceKind === "ffmpeg_source";
                     obsSourcesDetails[item.sourceName] = { isVideo: isVid };
                     if (!availableObsSources.includes(item.sourceName)) availableObsSources.push(item.sourceName);
-                    // On met en cache tous les IDs des sources dès le lancement, ce qui supprime le temps de latence au changement de scène !
                     sceneItemIds[sceneName + ":::" + item.sourceName] = item.sceneItemId;
                 });
             }
@@ -580,7 +568,6 @@ async function fetchSpotifyApi(endpoint, method = 'GET', body = null, isRetry = 
     return await res.json();
 }
 
-// Replier/Déplier la config Spotify
 function toggleSpotifyConfig() {
     const content = document.getElementById('spotify-config-content');
     const chevron = document.getElementById('spotify-config-chevron');
@@ -680,9 +667,6 @@ async function toggleSpotifyPlayPause() {
     } catch (e) { statusEl.innerText = "❌ Erreur 404 : Aucun appareil actif !"; setTimeout(() => statusEl.innerText = "", 5000); }
 }
 
-// -----------------------------------------
-// POLLING GLOBAL (POUR LE CONTROLEUR ET LA WEB APP)
-// -----------------------------------------
 function startPlayerPolling() {
     if(playerPollInterval) clearInterval(playerPollInterval);
     playerPollInterval = setInterval(async () => {
@@ -692,7 +676,6 @@ function startPlayerPolling() {
 }
 
 function updateGlobalPlayerUI(state) {
-    // 1. MAJ du texte en vert sur le Contrôleur
     const ctrlNp = document.getElementById('controller-now-playing');
     if (!state || !state.item) {
         if(ctrlNp) ctrlNp.style.display = 'none';
@@ -707,13 +690,9 @@ function updateGlobalPlayerUI(state) {
             document.getElementById('controller-np-playlist').textContent = " - " + contextName;
         }
     }
-    // 2. MAJ de la Web App
     if(webAppActive) updateWebAppPlayerUI(state);
 }
 
-// -----------------------------------------
-// INTÉGRATION SPOTIFY WEB APP (Moitié Droite)
-// -----------------------------------------
 function toggleSpotifyWebApp() {
     webAppActive = !webAppActive;
     const rightSide = document.getElementById('spotify-webapp-side');
