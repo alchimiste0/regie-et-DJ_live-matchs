@@ -21,20 +21,21 @@ if (!sequences) {
         mtPubs: [
             {name: "SPONSORS", isVideo: false}, 
             {name: "SPONSORS_2", isVideo: false}, 
-            // 🍔 POUR AJOUTER MCDO PLUS TARD : Enlève les // au début de la ligne ci-dessous
-            // {name: "VIDEO_PUB_MCDO", isVideo: true}, 
             {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
             {name: "VIDEO_PUB_Story", isVideo: true}
         ],
         finPubs: [
             {name: "SPONSORS", isVideo: false}, 
             {name: "SPONSORS_2", isVideo: false}, 
-            // 🍔 POUR AJOUTER MCDO PLUS TARD : Enlève les // au début de la ligne ci-dessous
-            // {name: "VIDEO_PUB_MCDO", isVideo: true}, 
             {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
             {name: "VIDEO_PUB_Story", isVideo: true}
-        ]
+        ],
+        entreeJoueurs: []
     };
+    localStorage.setItem('obs_sequences', JSON.stringify(sequences));
+}
+if (!sequences.entreeJoueurs) {
+    sequences.entreeJoueurs = [];
     localStorage.setItem('obs_sequences', JSON.stringify(sequences));
 }
 
@@ -45,7 +46,6 @@ let obsSourcesDetails = {};
 let currentSequenceTarget = null;
 let selectedSequenceSources = [];
 
-// États des moteurs de boucles
 let mtState = { queue: [], activeSource: null, scene: null };
 let finState = { phase: 'REPLAY', replayIdx: 0, pubIdx: 0, loopCount: 0, startTime: 0, activeSource: null };
 // -----------------------------------------
@@ -54,6 +54,7 @@ let teamRoster = { A: [], B: [] }; let graphicTimeouts = {}; let pendingSelectio
 
 const sourceNames = {
   sceneName: "LIVE", compoScene: "COMPOSITION", miTempsScene: "MI-TEMPS", miTempsReplayScene: "MI-TEMPS - REPLAY", finMatchScene: "FIN DE MATCH", finMatchReplayScene: "FIN DE MATCH - REPLAY", replayScene: "REPLAY",
+  entreeScene: "ENTREE_JOUEURS", 
   A: "SCORE-VISITEUR", B: "SCORE-DOMICILE", A_Name: "EQUIPE-VISITEUR", B_Name: "EQUIPE-DOMICILE", A_Compo: "COMPO_VISITEUR", B_Compo: "COMPO_DOMICILE", C: "PERIODE", D: "CHRONOMETRE",
   penaltyA_solo: "TEXTE_PEN_VIS_1", penaltyA1: "TEXTE_PEN_VIS_1", penaltyA2: "TEXTE_PEN_VIS_2", penaltyB_solo: "TEXTE_PEN_DOM_1", penaltyB1: "TEXTE_PEN_DOM_1", penaltyB2: "TEXTE_PEN_DOM_2", penaltyImageA: "PEN_VIS1", penaltyImageA2: "PEN_VIS2", penaltyImageB: "PEN_DOM1", penaltyImageB2: "PEN_DOM2",
   replayMediaNormal: "REPLAY_VIDEO", replayMediaMT: "MI-TEMPS VIDEO", replayMediaFin: "FIN VIDEO", replayImageNormal: "IMAGE_REPLAY",
@@ -63,6 +64,10 @@ const sourceNames = {
   top5Joueurs: "TOP5_POINTEURS_TEXTE", top5PtsJoueurs: "TOP5_PTS_POINTEURS_TEXTE", resumeDom: "RESUME_TEXTE_DOM", resumeVis: "RESUME_TEXTE_VIS", matchsDirectTexte: "MATCHS_DIRECT_TEXTE"
 };
 let obs;
+
+// --- VARIABLES POUR L'ENTRÉE DES JOUEURS ---
+let isEntreePlaying = false; 
+let currentEntreeSource = null;
 
 function formatTime(totalSeconds) { const minutes = Math.floor(totalSeconds / 60); const seconds = totalSeconds % 60; return { minutes: String(minutes).padStart(2, '0'), seconds: String(seconds).padStart(2, '0') }; }
 function syncTimerDisplayAndOBS() { const time = formatTime(timerCurrentSeconds); document.getElementById('timerMinutes').value = time.minutes; document.getElementById('timerSeconds').value = time.seconds; updateOBSText(sourceNames.D, `${time.minutes}:${time.seconds}`); }
@@ -89,13 +94,105 @@ function toggleLayout() { document.body.classList.toggle("horizontal-layout"); }
 
 function switchScene(sceneName) { 
   if (!ensureOBSConnection()) return; 
-  if (sceneName !== sourceNames.miTempsScene && sceneName !== sourceNames.miTempsReplayScene && sceneName !== sourceNames.finMatchReplayScene && sceneName !== sourceNames.replayScene) { 
+  if (sceneName !== sourceNames.miTempsScene && sceneName !== sourceNames.miTempsReplayScene && sceneName !== sourceNames.finMatchReplayScene && sceneName !== sourceNames.replayScene && sceneName !== sourceNames.entreeScene) { 
       forceStopReplay(false); 
   } 
   sendReq("SetCurrentProgramScene", { sceneName: sceneName }); 
   currentLiveScene = sceneName; 
 }
 function triggerGraphic(sourceName) { setSourceVisibility(sourceName, true, sourceNames.sceneName); if (graphicTimeouts[sourceName]) clearTimeout(graphicTimeouts[sourceName]); graphicTimeouts[sourceName] = setTimeout(() => { setSourceVisibility(sourceName, false, sourceNames.sceneName); }, 5000); }
+
+
+// ==========================================
+// MOTEUR : ENTRÉE DES JOUEURS DANS LE MODAL
+// ==========================================
+
+function openEntreeModal() {
+    switchScene(sourceNames.entreeScene); 
+    document.getElementById('entree-modal').style.display = 'flex'; 
+    renderEntreeList(); 
+}
+
+function closeEntreeModal() {
+    document.getElementById('entree-modal').style.display = 'none';
+}
+
+function closeEntreeModalAndSwitch(action) {
+    closeEntreeModal();
+    if (action === 'MI_TEMPS_AUTO') handleMiTempsClick();
+    else if (action === 'GEN_FIN_AUTO') startFinMatchReplayCycle();
+    else switchScene(action);
+}
+
+function renderEntreeList() {
+    const container = document.getElementById('entree-modal-grid');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    sequences.entreeJoueurs.forEach(seqItem => {
+        const source = seqItem.name;
+        const safeId = source.replace(/\W/g, ''); 
+        
+        // Extraction intelligente du format "#87 Roman"
+        let num = "▶";
+        let nom = source.replace(/_/g, ' ').replace(/VIDEO/i, '').trim();
+        const match = nom.match(/#(\d+)\s*(.*)/);
+        if (match) {
+            num = match[1];
+            nom = match[2];
+        }
+
+        const btn = document.createElement('button');
+        btn.id = 'btn-entree-' + safeId;
+        
+        if (isEntreePlaying && currentEntreeSource === source) {
+            btn.innerHTML = `<b style="font-size:16px;">⏳</b><br>En cours...`;
+            btn.style.backgroundColor = "#d39e00"; 
+            btn.style.color = "white";
+        } else {
+            // Utilise le design CSS par défaut des boutons de la grille "Buts"
+            btn.innerHTML = `<b>${num !== "▶" ? "#"+num : "▶"}</b><br>${nom}`;
+            btn.style.backgroundColor = ""; 
+            btn.style.color = "";
+        }
+        
+        btn.onclick = () => playEntreeVideo(source);
+        container.appendChild(btn);
+    });
+    
+    if (sequences.entreeJoueurs.length === 0) {
+        container.innerHTML = '<div style="font-size:13px; color:#aaa; text-align: center; grid-column: 1/-1;">Configurez d\'abord vos vidéos dans l\'onglet Séquences !</div>';
+    }
+}
+
+function playEntreeVideo(sourceName) {
+    if (isEntreePlaying) return; 
+    
+    isEntreePlaying = true;
+    currentEntreeSource = sourceName;
+    
+    renderEntreeList();
+    
+    sequences.entreeJoueurs.forEach(seqItem => {
+        if (seqItem.name !== sourceName) setSourceVisibility(seqItem.name, false, sourceNames.entreeScene);
+    });
+    
+    restartMediaSource(sourceName);
+    setSourceVisibility(sourceName, true, sourceNames.entreeScene);
+    
+    setTimeout(() => {
+        sendReq("GetMediaInputStatus", { inputName: sourceName }, "media_status:::" + sourceName + ":::0");
+    }, 200);
+}
+
+function endEntreeVideo(sourceName) {
+    setSourceVisibility(sourceName, false, sourceNames.entreeScene);
+    isEntreePlaying = false;
+    currentEntreeSource = null;
+    
+    renderEntreeList();
+}
 
 
 // ==========================================
@@ -120,7 +217,6 @@ function playReplayFile(mediaSource, scene, file) {
     setSourceVisibility(mediaSource, true, scene);
 }
 
-// ------ Lancement de la Mi-Temps Automatique ------
 function handleMiTempsClick() { 
     forceStopReplay(false); 
     const useReplay = replayBufferActive && replayList.length > 0; 
@@ -128,14 +224,12 @@ function handleMiTempsClick() {
     mtState.scene = useReplay ? sourceNames.miTempsReplayScene : sourceNames.miTempsScene; 
     switchScene(mtState.scene); 
     
-    // On cache TOUT au moment du lancement pour éviter des superpositions
     [...sequences.mtInfos, ...sequences.mtPubs].forEach(s => setSourceVisibility(s.name, false, mtState.scene)); 
     setSourceVisibility(sourceNames.replayMediaMT, false, mtState.scene); 
     
     mtState.queue = []; 
     mtState.activeSource = null; 
     
-    // Délai de 200ms pour laisser le temps à OBS de tout masquer proprement
     setTimeout(stepMiTemps, 200); 
 }
 
@@ -158,7 +252,6 @@ function stepMiTemps() {
             sequences.mtPubs.forEach(pub => mtState.queue.push({ type: 'PUB', item: pub }));
         } else {
             let maxSlots = sequences.mtInfos.length > 0 ? sequences.mtInfos.length : 1;
-            // ICI LE NOUVEAU CALCUL : Minimum 3 replays par bloc (si disponibles)
             let replaysPerSlot = Math.max(3, Math.ceil(replayList.length / maxSlots));
             
             let replayIndex = 0;
@@ -179,7 +272,6 @@ function stepMiTemps() {
                     }
                 }
             }
-            
             sequences.mtPubs.forEach(pub => mtState.queue.push({ type: 'PUB', item: pub }));
         }
     }
@@ -204,8 +296,6 @@ function stepMiTemps() {
     }
 }
 
-
-// ------ Lancement du Générique de Fin de Match ------
 function startFinMatchReplayCycle() {
     forceStopReplay(false); 
     seqMode = 'FIN_MATCH'; 
@@ -242,7 +332,6 @@ function stepFinMatch() {
         } 
         
         const timeElapsed = Date.now() - finState.startTime; 
-        // Lancer les pubs après 2 boucles OU 2 minutes
         if ((timeElapsed > 120000 || finState.loopCount >= 2) && sequences.finPubs.length > 0) { 
             finState.phase = 'PUB'; finState.pubIdx = 0; 
             setSourceVisibility(sourceNames.replayMediaFin, false, finState.scene); 
@@ -282,9 +371,6 @@ function stepFinMatch() {
     } 
 }
 
-// ----------------------------------------------------
-// UI GESTIONNAIRE DE SÉQUENCES AVEC DRAG & DROP
-// ----------------------------------------------------
 function toggleSequenceConfig() {
     const content = document.getElementById('sequence-config-content');
     const chevron = document.getElementById('sequence-config-chevron');
@@ -298,20 +384,12 @@ function loadObsSourcesForSequences() {
     sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsScene }, "get_sources_:::" + sourceNames.miTempsScene);
     sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsReplayScene }, "get_sources_:::" + sourceNames.miTempsReplayScene);
     sendReq("GetSceneItemList", { sceneName: sourceNames.finMatchReplayScene }, "get_sources_:::" + sourceNames.finMatchReplayScene);
+    sendReq("GetSceneItemList", { sceneName: sourceNames.entreeScene }, "get_sources_:::" + sourceNames.entreeScene);
 }
 
 let dragSrcEl = null;
-function handleDragStart(e) {
-    dragSrcEl = this;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', JSON.stringify({ index: this.dataset.index, list: this.dataset.list }));
-    this.classList.add('dragging');
-}
-function handleDragOver(e) {
-    if (e.preventDefault) e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    return false;
-}
+function handleDragStart(e) { dragSrcEl = this; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', JSON.stringify({ index: this.dataset.index, list: this.dataset.list })); this.classList.add('dragging'); }
+function handleDragOver(e) { if (e.preventDefault) e.preventDefault(); e.dataTransfer.dropEffect = 'move'; return false; }
 function handleDragEnter(e) { this.classList.add('over'); }
 function handleDragLeave(e) { this.classList.remove('over'); }
 function handleDrop(e) {
@@ -327,18 +405,17 @@ function handleDrop(e) {
             const item = sequences[listName].splice(fromIdx, 1)[0];
             sequences[listName].splice(toIdx, 0, item);
             renderSequenceList();
+            if (listName === 'entreeJoueurs') renderEntreeList(); 
         }
     }
     return false;
 }
-function handleDragEnd(e) {
-    this.classList.remove('dragging');
-    document.querySelectorAll('.seq-item').forEach(el => el.classList.remove('over'));
-}
+function handleDragEnd(e) { this.classList.remove('dragging'); document.querySelectorAll('.seq-item').forEach(el => el.classList.remove('over')); }
 
 function renderSequenceList() {
-    ['mtInfos', 'mtPubs', 'finPubs'].forEach(listName => {
-        const container = document.getElementById(`list-${listName.replace(/([A-Z])/g, "-$1").toLowerCase()}`);
+    ['mtInfos', 'mtPubs', 'finPubs', 'entreeJoueurs'].forEach(listName => {
+        const htmlId = listName.replace(/([A-Z])/g, "-$1").toLowerCase();
+        const container = document.getElementById(`list-${htmlId}`);
         if (!container) return; container.innerHTML = '';
         sequences[listName].forEach((item, idx) => {
             const div = document.createElement('div');
@@ -367,19 +444,22 @@ function renderSequenceList() {
     localStorage.setItem('obs_sequences', JSON.stringify(sequences));
 }
 
-function deleteSequenceItem(listName, idx) { sequences[listName].splice(idx, 1); renderSequenceList(); }
+function deleteSequenceItem(listName, idx) { 
+    sequences[listName].splice(idx, 1); 
+    renderSequenceList(); 
+    if(listName === 'entreeJoueurs') renderEntreeList();
+}
 
 function openSequenceModal(listName) {
-    currentSequenceTarget = listName;
-    selectedSequenceSources = [];
-    document.getElementById("sequence-search").value = ""; 
-    const grid = document.getElementById("sequence-grid");
-    grid.innerHTML = "";
+    currentSequenceTarget = listName; selectedSequenceSources = []; document.getElementById("sequence-search").value = ""; 
+    const grid = document.getElementById("sequence-grid"); grid.innerHTML = "";
     
     let title = "";
     if (listName === 'mtInfos') title = "Mi-Temps : Infos Sportives";
     else if (listName === 'mtPubs') title = "Mi-Temps : Pubs & Sponsors";
-    else title = "Fin de Match : Pubs & Sponsors";
+    else if (listName === 'finPubs') title = "Fin de Match : Pubs & Sponsors";
+    else if (listName === 'entreeJoueurs') title = "Entrée des Joueurs : Vidéos";
+    
     document.getElementById("sequence-modal-title").innerText = `Sélectionner pour ${title}`;
 
     availableObsSources.sort().forEach(sourceName => {
@@ -388,13 +468,8 @@ function openSequenceModal(listName) {
         btn.innerHTML = `${isVid ? '🎥' : '🖼️'} ${sourceName}`;
         btn.onclick = () => {
             const idx = selectedSequenceSources.indexOf(sourceName);
-            if (idx > -1) {
-                selectedSequenceSources.splice(idx, 1);
-                btn.style.borderColor = "#666"; btn.style.backgroundColor = "#444";
-            } else {
-                selectedSequenceSources.push(sourceName);
-                btn.style.borderColor = "#1DB954"; btn.style.backgroundColor = "#282828";
-            }
+            if (idx > -1) { selectedSequenceSources.splice(idx, 1); btn.style.borderColor = "#666"; btn.style.backgroundColor = "#444"; } 
+            else { selectedSequenceSources.push(sourceName); btn.style.borderColor = "#1DB954"; btn.style.backgroundColor = "#282828"; }
         };
         grid.appendChild(btn);
     });
@@ -418,41 +493,27 @@ function saveSequenceSelection() {
         sequences[currentSequenceTarget].push({ name: sourceName, isVideo: isVid });
     });
     renderSequenceList();
+    if(currentSequenceTarget === 'entreeJoueurs') renderEntreeList(); 
     closeSequenceModal();
 }
-
-
-// ==========================================
-// SYSTEME DE FILE D'ATTENTE POUR LES POPUPS (OVERLAY)
-// ==========================================
 
 let currentModalAction = null; let currentModalTeam = null; let currentModalDuration = null;
 let overlayQueue = [];
 let isOverlayActive = false;
 
 function processOverlayQueue() {
-    // Si un bandeau est déjà en cours ou qu'il n'y a rien à afficher, on s'arrête.
     if (isOverlayActive || overlayQueue.length === 0) return;
-    
     isOverlayActive = true;
-    const text = overlayQueue.shift(); // On prend le prochain bandeau
+    const text = overlayQueue.shift(); 
     
-    // 1. Apparition du bandeau
     updateOBSText(sourceNames.overlayName, text);
     setSourceVisibility(sourceNames.overlayImage, true, sourceNames.sceneName);
     setSourceVisibility(sourceNames.overlayName, true, sourceNames.sceneName);
     
-    // 2. Disparition après 6 secondes
     setTimeout(() => {
         setSourceVisibility(sourceNames.overlayImage, false, sourceNames.sceneName);
         setSourceVisibility(sourceNames.overlayName, false, sourceNames.sceneName);
-        
-        // 3. Pause d'1 seconde pour laisser le temps à l'animation de sortie (Fade) de se terminer sur OBS
-        setTimeout(() => {
-            isOverlayActive = false;
-            processOverlayQueue(); // On relance pour voir s'il y en a un autre en attente
-        }, 1000);
-        
+        setTimeout(() => { isOverlayActive = false; processOverlayQueue(); }, 1000);
     }, 6000);
 }
 
@@ -560,11 +621,40 @@ function connectOBS() {
             else if (p.d.requestId.startsWith("get_sources_")) {
                 const sceneName = p.d.requestId.split(":::")[1];
                 p.d.responseData.sceneItems.forEach(item => { 
-                    const isVid = item.sourceName.toUpperCase().includes("VIDEO") || item.sourceKind === "ffmpeg_source";
+                    const isVid = item.sourceName.toUpperCase().includes("VIDEO") || item.sourceKind === "ffmpeg_source" || item.sourceKind === "vlc_source";
                     obsSourcesDetails[item.sourceName] = { isVideo: isVid };
                     if (!availableObsSources.includes(item.sourceName)) availableObsSources.push(item.sourceName);
-                    sceneItemIds[sceneName + ":::" + item.sourceName] = item.sceneItemId;
+                    sceneItemIds[sceneName + ":::" + item.sourceName] = item.sceneItemId; 
                 });
+            }
+            // CALCUL DU FONDU DE SORTIE 750ms POUR LES VIDEOS JOUEURS (Manuel via Séquences)
+            else if (p.d.requestId.startsWith("media_status:::")) {
+                const parts = p.d.requestId.split(":::");
+                const srcName = parts[1];
+                const retries = parseInt(parts[2]) || 0;
+                
+                if (srcName !== currentEntreeSource) return;
+                
+                const status = p.d.responseData;
+                
+                if (status.mediaDuration > 0) {
+                    const remaining = status.mediaDuration - status.mediaCursor;
+                    const timeToFade = remaining - 750; // Anticipation de 750ms
+                    
+                    if (timeToFade > 0) {
+                        setTimeout(() => {
+                            if (currentEntreeSource === srcName) endEntreeVideo(srcName);
+                        }, timeToFade);
+                    } else {
+                        endEntreeVideo(srcName);
+                    }
+                } else {
+                    if (retries < 30) {
+                        setTimeout(() => sendReq("GetMediaInputStatus", { inputName: srcName }, `media_status:::${srcName}:::${retries + 1}`), 100);
+                    } else {
+                        setTimeout(() => endEntreeVideo(srcName), 5000); // Coupure de sécurité 5 sec
+                    }
+                }
             }
         }
     };
@@ -572,7 +662,17 @@ function connectOBS() {
     obs.onclose = () => setTimeout(connectOBS, 3000);
 }
 function ensureOBSConnection() { return (obs && obs.readyState === WebSocket.OPEN); }
-function setSourceVisibility(sourceName, isVisible, targetScene) { if (!targetScene) return; const cacheKey = targetScene + ":::" + sourceName; if (sceneItemIds[cacheKey] !== undefined) sendReq("SetSceneItemEnabled", { sceneName: targetScene, sceneItemId: sceneItemIds[cacheKey], sceneItemEnabled: isVisible }); else sendReq("GetSceneItemId", { sceneName: targetScene, sourceName: sourceName }, "getid:::" + targetScene + ":::" + sourceName + ":::" + isVisible); }
+
+function setSourceVisibility(sourceName, isVisible, targetScene) { 
+    if (!targetScene) return; 
+    const cacheKey = targetScene + ":::" + sourceName; 
+    if (sceneItemIds[cacheKey] !== undefined) { 
+        sendReq("SetSceneItemEnabled", { sceneName: targetScene, sceneItemId: sceneItemIds[cacheKey], sceneItemEnabled: isVisible }); 
+    } else { 
+        sendReq("GetSceneItemId", { sceneName: targetScene, sourceName: sourceName }, "getid:::" + targetScene + ":::" + sourceName + ":::" + isVisible); 
+    } 
+}
+
 function updateOBSText(sourceName, newText) { sendReq("SetInputSettings", { inputName: sourceName, inputSettings: { text: String(newText) } }); }
 
 const cleanTeamName = (name) => { if (!name) return ""; let clean = name.replace(/^\d{5}\s*[-]?\s*/, ''); clean = clean.replace(/^\d+\s*-\s*/, ''); clean = clean.replace(/\s*-?\s*(ELITE|N[1-4]|N\s*[1-4]|PRENAT|NAT).*$/i, ''); return clean.trim(); };
@@ -580,7 +680,7 @@ const formatMatchLine = (dom, scoreDom, scoreVis, vis) => { let leftText = `${do
 function openAllRolskanetPages() { window.open('https://rolskanet.fr/sportif/synthese/rencontres/LH', '_blank'); window.open('https://rolskanet.fr/sportif/synthese/classements/LH', '_blank'); window.open('https://rolskanet.fr/sportif/statistiques/LH', '_blank'); }
 function processClassement(data) { let strEq = "", strMj = "", strPts = "", strBp = "", strBc = "", strDiff = "", strTop5Eq = "", strTop5Pts = ""; data.slice(0, 10).forEach(t => { let teamName = cleanTeamName(t.eq); strEq += `${t.pos} - ${teamName}\n`; strMj += `${t.mj}\n`; strPts += `${t.pts}\n`; strBp += `${t.bp}\n`; strBc += `${t.bc}\n`; strDiff += `${t.diff}\n`; }); data.slice(0, 5).forEach(t => { strTop5Eq += `${t.pos} - ${cleanTeamName(t.eq)}\n`; strTop5Pts += `${t.pts}\n`; }); updateOBSText(sourceNames.classEquipes, strEq.trim()); updateOBSText(sourceNames.classMJ, strMj.trim()); updateOBSText(sourceNames.classPts, strPts.trim()); updateOBSText(sourceNames.classBP, strBp.trim()); updateOBSText(sourceNames.classBC, strBc.trim()); updateOBSText(sourceNames.classDiff, strDiff.trim()); updateOBSText(sourceNames.top5Equipes, strTop5Eq.trim()); updateOBSText(sourceNames.top5PtsEquipes, strTop5Pts.trim()); document.getElementById("rolskanet-status").innerText = "✅ TOP 10 et TOP 5 Classement mis à jour !"; }
 function processPointeurs(data) { let strJ = "", strMj = "", strPts = "", strB = "", strA = "", strTop5J = "", strTop5PtsJ = ""; data.slice(0, 10).forEach((p, idx) => { let rank = p.pos ? p.pos : (idx + 1); strJ += `${rank} - ${p.j}\n`; strMj += `${p.mj}\n`; strPts += `${p.pts}\n`; strB += `${p.b}\n`; strA += `${p.a}\n`; }); data.slice(0, 5).forEach((p, idx) => { let rank = p.pos ? p.pos : (idx + 1); strTop5J += `${rank} - ${p.j}\n`; strTop5PtsJ += `${p.pts}\n`; }); updateOBSText(sourceNames.pointJoueurs, strJ.trim()); updateOBSText(sourceNames.pointMJ, strMj.trim()); updateOBSText(sourceNames.pointPts, strPts.trim()); updateOBSText(sourceNames.pointB, strB.trim()); updateOBSText(sourceNames.pointA, strA.trim()); updateOBSText(sourceNames.top5Joueurs, strTop5J.trim()); updateOBSText(sourceNames.top5PtsJoueurs, strTop5PtsJ.trim()); document.getElementById("rolskanet-status").innerText = "✅ TOP 10 et TOP 5 Pointeurs mis à jour !"; }
-function fetchRolskanetData() { const input = document.getElementById("rolskanetId").value.trim(); if (!input) return alert("Veuillez coller le code JSON..."); const statusText = document.getElementById("rolskanet-status"); statusText.style.color = "yellow"; statusText.innerText = "⏳ Analyse en cours..."; try { if (!input.startsWith("{") && !input.startsWith("[")) throw new Error("Format invalide."); const parsedData = JSON.parse(input); if (parsedData.data && Array.isArray(parsedData.data) && parsedData.data[0] && parsedData.data[0].receveur && parsedData.data[0].visiteur) { let strMatchs = ""; let targetDate = ""; if (parsedData.data[0].infosRencontre && parsedData.data[0].infosRencontre.date_rencontre) targetDate = parsedData.data[0].infosRencontre.date_rencontre.split(' ')[0]; let filteredMatches = parsedData.data; if (targetDate) filteredMatches = parsedData.data.filter(m => m.infosRencontre && m.infosRencontre.date_rencontre && m.infosRencontre.date_rencontre.startsWith(targetDate)); filteredMatches.slice(0, 10).forEach(m => { let dom = cleanTeamName(m.receveur.libelle_court || m.receveur.libelle); let vis = cleanTeamName(m.visiteur.libelle_court || m.visiteur.libelle); let scoreDom = 0, scoreVis = 0; if (m.score && Array.isArray(m.score)) { let sD = m.score.find(s => s.equipe_id === m.receveur.id); let sV = m.score.find(s => s.equipe_id === m.visiteur.id); if(sD) scoreDom = sD.score; if(sV) scoreVis = sV.score; } strMatchs += formatMatchLine(dom, scoreDom, scoreVis, vis) + '\n'; }); updateOBSText(sourceNames.matchsDirectTexte, strMatchs.trim() || "Aucun match lu."); document.getElementById("rolskanetId").value = ""; statusText.style.color = "#1ed760"; statusText.innerText = "✅ Matchs en direct mis à jour (Alignés) !"; return; } if (parsedData._source === "bookmarklet") { if (parsedData.type === "live") { const pd = parsedData.data; const domName = cleanTeamName(pd.receveur.libelle_court || pd.receveur.libelle); const visName = cleanTeamName(pd.visiteur.libelle_court || pd.visiteur.libelle); document.getElementById("domName").value = domName; document.getElementById("visName").value = visName; updateTeamName('B', domName); updateTeamName('A', visName); let scoreDom = 0; let scoreVis = 0; if (pd.scores) { pd.scores.forEach(s => { if (s.equipe_id === pd.receveur.id) scoreDom = s.score; if (s.equipe_id === pd.visiteur.id) scoreVis = s.score; }); } scores.B = scoreDom; document.getElementById("scoreB").textContent = scoreDom; updateOBSText(sourceNames.B, scoreDom); scores.A = scoreVis; document.getElementById("scoreA").textContent = scoreVis; updateOBSText(sourceNames.A, scoreVis); if (pd.evenements) { const buildResume = (teamId) => { let penCount = pd.evenements.filter(e => e.type === "PENALITE" && e.equipe && e.equipe.id === teamId).length; let goals = pd.evenements.filter(e => e.type === "BUT" && e.equipe && e.equipe.id === teamId).sort((a,b) => a.temps - b.temps); let str = `Nombre de pénalité(s): ${penCount}\nNombre de but(s): ${goals.length}\n\n`; goals.forEach(g => { let m = String(Math.floor(g.temps / 60)).padStart(2, '0'); let s = String(g.temps % 60).padStart(2, '0'); let nom = g.buteur ? g.buteur.nom_complet.replace(/^(M |Mme )/, "") : "Inconnu"; str += `${m}:${s} - ${nom}\n`; }); return str.trim(); }; updateOBSText(sourceNames.resumeDom, buildResume(pd.receveur.id)); updateOBSText(sourceNames.resumeVis, buildResume(pd.visiteur.id)); } const jDom = pd.joueurs.filter(j => j.equipe_id === pd.receveur.id); const jVis = pd.joueurs.filter(j => j.equipe_id === pd.visiteur.id); const sDom = pd.staffs ? pd.staffs.filter(s => s.equipe_id === pd.receveur.id) : []; const sVis = pd.staffs ? pd.staffs.filter(s => s.equipe_id === pd.visiteur.id) : []; const sortByNum = (a, b) => (parseInt(a.numero) || 0) - (parseInt(b.numero) || 0); jDom.sort(sortByNum); jVis.sort(sortByNum); const formatNom = (nom) => nom.replace(/^(M |Mme )/, ""); teamRoster.B = jDom.map(j => ({ nom: formatNom(j.nom_complet), num: j.numero || "0", type: "J" })); teamRoster.B.push(...sDom.map(s => ({ nom: formatNom(s.nom_complet), num: "Staff", type: "S" }))); teamRoster.A = jVis.map(j => ({ nom: formatNom(j.nom_complet), num: j.numero || "0", type: "J" })); teamRoster.A.push(...sVis.map(s => ({ nom: formatNom(s.nom_complet), num: "Staff", type: "S" }))); const buildCompo = (joueurs, staffs) => { let str = ""; joueurs.forEach(j => { let attr = ""; if(j.attributs && j.attributs.length > 0) { if(j.attributs[0].code === "CA") attr = " (C)"; if(j.attributs[0].code === "ASS") attr = " (A)"; } str += `${j.numero || "0"} - ${formatNom(j.nom_complet)}${attr}\n`; }); staffs.forEach(s => { let role = s.attributs && s.attributs.length > 0 ? s.attributs[0].libelle : "Staff"; str += `${role} - ${formatNom(s.nom_complet)}\n`; }); return str.trim(); }; updateOBSText(sourceNames.B_Compo, buildCompo(jDom, sDom)); updateOBSText(sourceNames.A_Compo, buildCompo(jVis, sVis)); statusText.innerText = "✅ Match : Compos et Résumé mis à jour !"; } else if (parsedData.type === "classement") { let pools = [...new Set(parsedData.data.map(d => d.pool || "Poule 1"))]; if (pools.length > 1) { pendingSelectionType = 'classement'; pendingSelectionData = parsedData.data; openSelectionModal("Plusieurs poules détectées ! Sélectionnez celle à afficher :", pools.map(p => ({ label: p, value: p }))); } else { processClassement(parsedData.data); } } else if (parsedData.type === "pointeurs") { let teams = [...new Set(parsedData.data.map(d => d.eq).filter(Boolean))]; if (teams.length > 0) { let options = [{ label: "TOUT (Global)", value: "TOUT", color: "#28a745" }]; teams.forEach(t => options.push({ label: cleanTeamName(t), value: t })); pendingSelectionType = 'pointeurs'; pendingSelectionData = parsedData.data; openSelectionModal("Sélectionnez l'équipe pour les statistiques :", options); } else { processPointeurs(parsedData.data); } } else if (parsedData.type === "rencontres") { let strMatchs = ""; parsedData.data.slice(0, 10).forEach(m => { let dom = cleanTeamName(m.tA); let vis = cleanTeamName(m.tB); strMatchs += formatMatchLine(dom, m.sA, m.sB, vis) + '\n'; }); updateOBSText(sourceNames.matchsDirectTexte, strMatchs.trim() || "Aucun match lu."); statusText.innerText = "✅ Matchs en direct mis à jour (Alignés) !"; } } else { throw new Error("Format invalide ou non reconnu."); } document.getElementById("rolskanetId").value = ""; } catch (error) { console.error(error); statusText.style.color = "#ff4d4d"; statusText.innerHTML = `❌ Erreur : ${error.message}`; } }
+function fetchRolskanetData() { const input = document.getElementById("rolskanetId").value.trim(); if (!input) return alert("Veuillez coller le code JSON..."); const statusText = document.getElementById("rolskanet-status"); statusText.style.color = "yellow"; statusText.innerText = "⏳ Analyse en cours..."; try { if (!input.startsWith("{") && !input.startsWith("[")) throw new Error("Format invalide."); const parsedData = JSON.parse(input); if (parsedData.data && Array.isArray(parsedData.data) && parsedData.data[0] && parsedData.data[0].receveur && parsedData.data[0].visiteur) { let strMatchs = ""; let targetDate = ""; if (parsedData.data[0].infosRencontre && parsedData.data[0].infosRencontre.date_rencontre) targetDate = parsedData.data[0].infosRencontre.date_rencontre.split(' ')[0]; let filteredMatches = parsedData.data; if (targetDate) filteredMatches = parsedData.data.filter(m => m.infosRencontre && m.infosRencontre.date_rencontre && m.infosRencontre.date_rencontre.startsWith(targetDate)); filteredMatches.slice(0, 10).forEach(m => { let dom = cleanTeamName(m.receveur.libelle_court || m.receveur.libelle); let vis = cleanTeamName(m.visiteur.libelle_court || m.visiteur.libelle); let scoreDom = 0, scoreVis = 0; if (m.score && Array.isArray(m.score)) { let sD = m.score.find(s => s.equipe_id === m.receveur.id); let sV = m.score.find(s => s.equipe_id === m.visiteur.id); if(sD) scoreDom = sD.score; if(sV) scoreVis = sV.score; } strMatchs += formatMatchLine(dom, scoreDom, scoreVis, vis) + '\n'; }); updateOBSText(sourceNames.matchsDirectTexte, strMatchs.trim() || "Aucun match lu."); document.getElementById("rolskanetId").value = ""; statusText.style.color = "#1ed760"; statusText.innerText = "✅ Matchs en direct mis à jour (Alignés) !"; return; } if (parsedData._source === "bookmarklet") { if (parsedData.type === "live") { const pd = parsedData.data; const domName = cleanTeamName(pd.receveur.libelle_court || pd.receveur.libelle); const visName = cleanTeamName(pd.visiteur.libelle_court || pd.visiteur.libelle); document.getElementById("domName").value = domName; document.getElementById("visName").value = visName; updateTeamName('B', domName); updateTeamName('A', visName); let scoreDom = 0; let scoreVis = 0; if (pd.scores) { pd.scores.forEach(s => { if (s.equipe_id === pd.receveur.id) scoreDom = s.score; if (s.equipe_id === pd.visiteur.id) scoreVis = s.score; }); } scores.B = scoreDom; document.getElementById("scoreB").textContent = scoreDom; updateOBSText(sourceNames.B, scoreDom); scores.A = scoreVis; document.getElementById("scoreA").textContent = scoreVis; updateOBSText(sourceNames.A, scoreVis); if (pd.evenements) { const buildResume = (teamId) => { let penCount = pd.evenements.filter(e => e.type === "PENALITE" && e.equipe && e.equipe.id === teamId).length; let goals = pd.evenements.filter(e => e.type === "BUT" && e.equipe && e.equipe.id === teamId).sort((a,b) => a.temps - b.temps); let str = `Nombre de pénalité(s): ${penCount}\nNombre de but(s): ${goals.length}\n\n`; goals.forEach(g => { let m = String(Math.floor(g.temps / 60)).padStart(2, '0'); let s = String(g.temps % 60).padStart(2, '0'); let nom = g.buteur ? g.buteur.nom_complet.replace(/^(M |Mme )/, "") : "Inconnu"; str += `${m}:${s} - ${nom}\n`; }); return str.trim(); }; updateOBSText(sourceNames.resumeDom, buildResume(pd.receveur.id)); updateOBSText(sourceNames.resumeVis, buildResume(pd.visiteur.id)); } const jDom = pd.joueurs.filter(j => j.equipe_id === pd.receveur.id); const jVis = pd.joueurs.filter(j => j.equipe_id === pd.visiteur.id); const sDom = pd.staffs ? pd.staffs.filter(s => s.equipe_id === pd.receveur.id) : []; const sVis = pd.staffs ? pd.staffs.filter(s => s.equipe_id === pd.visiteur.id) : []; const sortByNum = (a, b) => (parseInt(a.numero) || 0) - (parseInt(b.numero) || 0); jDom.sort(sortByNum); jVis.sort(sortByNum); const formatNom = (nom) => nom.replace(/^(M |Mme )/, ""); teamRoster.B = jDom.map(j => ({ nom: formatNom(j.nom_complet), num: j.numero || "0", type: "J" })); teamRoster.B.push(...sDom.map(s => ({ nom: formatNom(s.nom_complet), num: "Staff", type: "S" }))); teamRoster.A = jVis.map(j => ({ nom: formatNom(j.nom_complet), num: j.numero || "0", type: "J" })); teamRoster.A.push(...sVis.map(s => ({ nom: formatNom(s.nom_complet), num: "Staff", type: "S" }))); const buildCompo = (joueurs, staffs) => { let str = ""; joueurs.forEach(j => { let attr = ""; if(j.attributs && j.attributs.length > 0) { if(j.attributs.find(a => a.code === "CA")) attr = " (C)"; if(j.attributs.find(a => a.code === "ASS")) attr = " (A)"; } str += `${j.numero || "0"} - ${formatNom(j.nom_complet)}${attr}\n`; }); staffs.forEach(s => { let role = s.attributs && s.attributs.length > 0 ? s.attributs[0].libelle : "Staff"; str += `${role} - ${formatNom(s.nom_complet)}\n`; }); return str.trim(); }; updateOBSText(sourceNames.B_Compo, buildCompo(jDom, sDom)); updateOBSText(sourceNames.A_Compo, buildCompo(jVis, sVis)); statusText.innerText = "✅ Match : Compos et Résumé mis à jour !"; } else if (parsedData.type === "classement") { let pools = [...new Set(parsedData.data.map(d => d.pool || "Poule 1"))]; if (pools.length > 1) { pendingSelectionType = 'classement'; pendingSelectionData = parsedData.data; openSelectionModal("Plusieurs poules détectées ! Sélectionnez celle à afficher :", pools.map(p => ({ label: p, value: p }))); } else { processClassement(parsedData.data); } } else if (parsedData.type === "pointeurs") { let teams = [...new Set(parsedData.data.map(d => d.eq).filter(Boolean))]; if (teams.length > 0) { let options = [{ label: "TOUT (Global)", value: "TOUT", color: "#28a745" }]; teams.forEach(t => options.push({ label: cleanTeamName(t), value: t })); pendingSelectionType = 'pointeurs'; pendingSelectionData = parsedData.data; openSelectionModal("Sélectionnez l'équipe pour les statistiques :", options); } else { processPointeurs(parsedData.data); } } else if (parsedData.type === "rencontres") { let strMatchs = ""; parsedData.data.slice(0, 10).forEach(m => { let dom = cleanTeamName(m.tA); let vis = cleanTeamName(m.tB); strMatchs += formatMatchLine(dom, m.sA, m.sB, vis) + '\n'; }); updateOBSText(sourceNames.matchsDirectTexte, strMatchs.trim() || "Aucun match lu."); statusText.innerText = "✅ Matchs en direct mis à jour (Alignés) !"; } } else { throw new Error("Format invalide ou non reconnu."); } document.getElementById("rolskanetId").value = ""; } catch (error) { console.error(error); statusText.style.color = "#ff4d4d"; statusText.innerHTML = `❌ Erreur : ${error.message}`; } }
 
 // ==========================================
 // --- MODULE DJ SPOTIFY & WEB APP ---
