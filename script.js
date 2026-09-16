@@ -22,14 +22,14 @@ if (!sequences) {
             {name: "SPONSORS", isVideo: false}, 
             {name: "SPONSORS_2", isVideo: false}, 
             {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
-            {name: "VIDEO_PUB_Story", isVideo: true}
+            {name: "VIDEO_PUB_Story", isVideo: true},
             {name: "VIDEO_PUB_LCdB", isVideo: true}
         ],
         finPubs: [
             {name: "SPONSORS", isVideo: false}, 
             {name: "SPONSORS_2", isVideo: false}, 
             {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
-            {name: "VIDEO_PUB_Story", isVideo: true}
+            {name: "VIDEO_PUB_Story", isVideo: true},
             {name: "VIDEO_PUB_LCdB", isVideo: true}
         ],
         entreeJoueurs: []
