@@ -136,7 +136,6 @@ function renderEntreeList() {
         const source = seqItem.name;
         const safeId = source.replace(/\W/g, ''); 
         
-        // Extraction intelligente du format "#87 Roman"
         let num = "▶";
         let nom = source.replace(/_/g, ' ').replace(/VIDEO/i, '').trim();
         const match = nom.match(/#(\d+)\s*(.*)/);
@@ -153,7 +152,6 @@ function renderEntreeList() {
             btn.style.backgroundColor = "#d39e00"; 
             btn.style.color = "white";
         } else {
-            // Utilise le design CSS par défaut des boutons de la grille "Buts"
             btn.innerHTML = `<b>${num !== "▶" ? "#"+num : "▶"}</b><br>${nom}`;
             btn.style.backgroundColor = ""; 
             btn.style.color = "";
@@ -387,6 +385,37 @@ function loadObsSourcesForSequences() {
     sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsReplayScene }, "get_sources_:::" + sourceNames.miTempsReplayScene);
     sendReq("GetSceneItemList", { sceneName: sourceNames.finMatchReplayScene }, "get_sources_:::" + sourceNames.finMatchReplayScene);
     sendReq("GetSceneItemList", { sceneName: sourceNames.entreeScene }, "get_sources_:::" + sourceNames.entreeScene);
+}
+
+// ==========================================
+// FONCTION DE RÉINITIALISATION DES SÉQUENCES
+// ==========================================
+function resetSequences() {
+    if (!confirm("Voulez-vous réinitialiser les listes Infos et Pubs par défaut ? (Vos vidéos Joueurs seront conservées)")) return;
+    
+    sequences.mtInfos = [
+        {name: "RESUME", isVideo: false}, 
+        {name: "SCORES_DIRECT", isVideo: false}, 
+        {name: "SCORE", isVideo: false}, 
+        {name: "CLASSEMENT-COMPLET", isVideo: false}, 
+        {name: "POINTEURS-COMPLET", isVideo: false}
+    ];
+    sequences.mtPubs = [
+        {name: "SPONSORS", isVideo: false}, 
+        {name: "SPONSORS_2", isVideo: false}, 
+        {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
+        {name: "VIDEO_PUB_Story", isVideo: true}
+    ];
+    sequences.finPubs = [
+        {name: "SPONSORS", isVideo: false}, 
+        {name: "SPONSORS_2", isVideo: false}, 
+        {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
+        {name: "VIDEO_PUB_Story", isVideo: true}
+    ];
+    
+    localStorage.setItem('obs_sequences', JSON.stringify(sequences));
+    renderSequenceList();
+    alert("✅ Séquences réinitialisées avec succès !");
 }
 
 let dragSrcEl = null;
@@ -629,7 +658,7 @@ function connectOBS() {
                     sceneItemIds[sceneName + ":::" + item.sourceName] = item.sceneItemId; 
                 });
             }
-            // CALCUL DU FONDU DE SORTIE 750ms POUR LES VIDEOS JOUEURS (Manuel via Séquences)
+            // CALCUL DU FONDU DE SORTIE 750ms POUR LES VIDEOS JOUEURS
             else if (p.d.requestId.startsWith("media_status:::")) {
                 const parts = p.d.requestId.split(":::");
                 const srcName = parts[1];
@@ -654,7 +683,7 @@ function connectOBS() {
                     if (retries < 30) {
                         setTimeout(() => sendReq("GetMediaInputStatus", { inputName: srcName }, `media_status:::${srcName}:::${retries + 1}`), 100);
                     } else {
-                        setTimeout(() => endEntreeVideo(srcName), 5000); // Coupure de sécurité 5 sec
+                        setTimeout(() => endEntreeVideo(srcName), 5000); 
                     }
                 }
             }
