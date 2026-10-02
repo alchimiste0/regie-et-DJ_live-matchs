@@ -22,15 +22,13 @@ if (!sequences) {
             {name: "SPONSORS", isVideo: false}, 
             {name: "SPONSORS_2", isVideo: false}, 
             {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
-            {name: "VIDEO_PUB_Story", isVideo: true},
-            {name: "VIDEO_PUB_LCdB", isVideo: true}
+            {name: "VIDEO_PUB_Story", isVideo: true}
         ],
         finPubs: [
             {name: "SPONSORS", isVideo: false}, 
             {name: "SPONSORS_2", isVideo: false}, 
             {name: "VIDEO_PUB_Maison-de-la-literie", isVideo: true}, 
-            {name: "VIDEO_PUB_Story", isVideo: true},
-            {name: "VIDEO_PUB_LCdB", isVideo: true}
+            {name: "VIDEO_PUB_Story", isVideo: true}
         ],
         entreeJoueurs: []
     };
@@ -48,6 +46,10 @@ let obsSourcesDetails = {};
 let currentSequenceTarget = null;
 let selectedSequenceSources = [];
 
+// ISOLATION DES SOURCES PAR SCENE
+let sceneSourcesMap = {}; 
+
+// États des moteurs de boucles
 let mtState = { queue: [], activeSource: null, scene: null };
 let finState = { phase: 'REPLAY', replayIdx: 0, pubIdx: 0, loopCount: 0, startTime: 0, activeSource: null };
 // -----------------------------------------
@@ -76,16 +78,32 @@ function syncTimerDisplayAndOBS() { const time = formatTime(timerCurrentSeconds)
 function updatePenaltyOBSText() { ['A', 'B'].forEach(team => { const sortedPenalties = penalties[team].sort((a, b) => a.timeRemaining - b.timeRemaining); const isVis = (team === 'A'); const text1 = isVis ? sourceNames.penaltyA1 : sourceNames.penaltyB1; const img1 = isVis ? sourceNames.penaltyImageA : sourceNames.penaltyImageB; const text2 = isVis ? sourceNames.penaltyA2 : sourceNames.penaltyB2; const img2 = isVis ? sourceNames.penaltyImageA2 : sourceNames.penaltyImageB2; if (sortedPenalties.length >= 1) { const time1 = formatTime(sortedPenalties[0].timeRemaining); setSourceVisibility(text1, true, sourceNames.sceneName); setSourceVisibility(img1, true, sourceNames.sceneName); updateOBSText(text1, `${time1.minutes}:${time1.seconds}`); } else { setSourceVisibility(text1, false, sourceNames.sceneName); setSourceVisibility(img1, false, sourceNames.sceneName); } if (sortedPenalties.length >= 2) { const time2 = formatTime(sortedPenalties[1].timeRemaining); setSourceVisibility(text2, true, sourceNames.sceneName); setSourceVisibility(img2, true, sourceNames.sceneName); updateOBSText(text2, `${time2.minutes}:${time2.seconds}`); } else { setSourceVisibility(text2, false, sourceNames.sceneName); setSourceVisibility(img2, false, sourceNames.sceneName); } }); }
 function tick() { if (isCountdown) { if (timerCurrentSeconds > 0) timerCurrentSeconds--; } else { if (timerCurrentSeconds < timerMaxSeconds) timerCurrentSeconds++; } const currentUI = uiPeriodStates[currentPeriodIndex]; if (currentUI !== "Échauffement" && currentUI !== "Mi-temps") { ['A', 'B'].forEach(team => { penalties[team].forEach(p => { if (p.timeRemaining > 0) p.timeRemaining--; }); penalties[team] = penalties[team].filter(p => p.timeRemaining > 0); }); } syncTimerDisplayAndOBS(); renderPenalties(); updatePenaltyOBSText(); if ((isCountdown && timerCurrentSeconds <= 0) || (!isCountdown && timerCurrentSeconds >= timerMaxSeconds)) stopTimer(); }
 function renderPenalties() { ['A', 'B'].forEach(team => { const container = document.getElementById('penalties' + team); container.innerHTML = ''; penalties[team].forEach(p => { const time = formatTime(p.timeRemaining); const item = document.createElement('div'); item.className = 'penalty-item'; item.innerHTML = `<div class="penalty-time-inputs"><input type="number" value="${time.minutes}" oninput="manualSetPenaltyTime('${team}', ${p.id}, this)">:<input type="number" value="${time.seconds}" oninput="manualSetPenaltyTime('${team}', ${p.id}, this)"></div><button class="penalty-delete-btn" onclick="deletePenalty('${team}', ${p.id})">🗑️</button>`; container.appendChild(item); }); }); }
-function addPenalty(team, minutes) { penalties[team].push({ id: Date.now(), timeRemaining: minutes * 60 }); renderPenalties(); updatePenaltyOBSText(); }
+
+// MODIFICATION PÉNALITÉS : On sauvegarde la durée originale de la pénalité pour bloquer le chrono
+function addPenalty(team, minutes) { penalties[team].push({ id: Date.now(), timeRemaining: minutes * 60, originalDuration: minutes * 60 }); renderPenalties(); updatePenaltyOBSText(); }
 function deletePenalty(team, penaltyId) { penalties[team] = penalties[team].filter(p => p.id !== penaltyId); renderPenalties(); updatePenaltyOBSText(); }
 function manualSetPenaltyTime(team, penaltyId, element) { const penalty = penalties[team].find(p => p.id === penaltyId); if (!penalty) return; const inputs = element.parentElement.querySelectorAll('input'); penalty.timeRemaining = (parseInt(inputs[0].value, 10) || 0) * 60 + (parseInt(inputs[1].value, 10) || 0); renderPenalties(); updatePenaltyOBSText(); }
+
 function startTimer() { if (timerInterval) return; const m = parseInt(document.getElementById('maxMinutes').value, 10) || 0; const s = parseInt(document.getElementById('maxSeconds').value, 10) || 0; timerMaxSeconds = (m * 60) + s; if (isCountdown && timerCurrentSeconds === 0) timerCurrentSeconds = timerMaxSeconds; timerInterval = setInterval(tick, 1000); document.getElementById('playPauseBtn').textContent = '❚❚'; document.getElementById('playPauseBtn').classList.replace('start-btn', 'stop-btn'); }
 function stopTimer() { clearInterval(timerInterval); timerInterval = null; document.getElementById('playPauseBtn').textContent = '▶'; document.getElementById('playPauseBtn').classList.replace('stop-btn', 'start-btn'); }
 function toggleTimer() { if (timerInterval) stopTimer(); else startTimer(); }
 function resetTimer() { stopTimer(); if (isCountdown) { const m = parseInt(document.getElementById('maxMinutes').value, 10) || 0; const s = parseInt(document.getElementById('maxSeconds').value, 10) || 0; timerCurrentSeconds = (m * 60) + s; } else timerCurrentSeconds = 0; syncTimerDisplayAndOBS(); }
 function manualSetTime() { const oldTime = timerCurrentSeconds; const m = parseInt(document.getElementById('timerMinutes').value, 10) || 0; const s = parseInt(document.getElementById('timerSeconds').value, 10) || 0; timerCurrentSeconds = (m * 60) + s; if (timerCurrentSeconds - oldTime !== 0) updatePenaltiesWithDelta(timerCurrentSeconds - oldTime); updateOBSText(sourceNames.D, `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`); renderPenalties(); updatePenaltyOBSText(); }
+
+// CORRECTION BUG CHRONO PÉNALITÉ : On plafonne la pénalité pour éviter de rajouter du temps
 function adjustTimer(delta) { const oldTime = timerCurrentSeconds; timerCurrentSeconds = Math.max(0, Math.min(5999, timerCurrentSeconds + delta)); if (timerCurrentSeconds - oldTime !== 0) updatePenaltiesWithDelta(timerCurrentSeconds - oldTime); syncTimerDisplayAndOBS(); renderPenalties(); updatePenaltyOBSText(); }
-function updatePenaltiesWithDelta(delta) { ['A', 'B'].forEach(team => { penalties[team].forEach(p => { p.timeRemaining -= isCountdown ? -delta : delta; if (p.timeRemaining < 0) p.timeRemaining = 0; }); penalties[team] = penalties[team].filter(p => p.timeRemaining > 0); }); }
+function updatePenaltiesWithDelta(delta) { 
+    ['A', 'B'].forEach(team => { 
+        penalties[team].forEach(p => { 
+            p.timeRemaining -= isCountdown ? -delta : delta; 
+            if (p.timeRemaining < 0) p.timeRemaining = 0; 
+            // Plafond de sécurité : une pénalité ne peut jamais dépasser sa durée d'origine
+            if (p.originalDuration && p.timeRemaining > p.originalDuration) p.timeRemaining = p.originalDuration; 
+        }); 
+        penalties[team] = penalties[team].filter(p => p.timeRemaining > 0); 
+    }); 
+}
+
 function invertTimerDirection() { isCountdown = !isCountdown; document.getElementById('invertBtn').textContent = isCountdown ? "Mode: Décompte" : "Mode: Chrono"; resetTimer(); }
 function setPeriod(index) { currentPeriodIndex = index; document.getElementById("periodDisplay").textContent = uiPeriodStates[currentPeriodIndex]; updateOBSText(sourceNames.C, obsPeriodStates[currentPeriodIndex]); switchScene(sourceNames.sceneName); }
 function changePeriod(delta) { setPeriod(Math.max(0, Math.min(uiPeriodStates.length - 1, currentPeriodIndex + delta))); }
@@ -190,7 +208,6 @@ function endEntreeVideo(sourceName) {
     setSourceVisibility(sourceName, false, sourceNames.entreeScene);
     isEntreePlaying = false;
     currentEntreeSource = null;
-    
     renderEntreeList();
 }
 
@@ -380,16 +397,13 @@ function toggleSequenceConfig() {
 }
 
 function loadObsSourcesForSequences() {
-    availableObsSources = [];
+    sceneSourcesMap = {}; // On vide la carte
     sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsScene }, "get_sources_:::" + sourceNames.miTempsScene);
     sendReq("GetSceneItemList", { sceneName: sourceNames.miTempsReplayScene }, "get_sources_:::" + sourceNames.miTempsReplayScene);
     sendReq("GetSceneItemList", { sceneName: sourceNames.finMatchReplayScene }, "get_sources_:::" + sourceNames.finMatchReplayScene);
     sendReq("GetSceneItemList", { sceneName: sourceNames.entreeScene }, "get_sources_:::" + sourceNames.entreeScene);
 }
 
-// ==========================================
-// FONCTION DE RÉINITIALISATION DES SÉQUENCES
-// ==========================================
 function resetSequences() {
     if (!confirm("Voulez-vous réinitialiser les listes Infos et Pubs par défaut ? (Vos vidéos Joueurs seront conservées)")) return;
     
@@ -486,14 +500,19 @@ function openSequenceModal(listName) {
     const grid = document.getElementById("sequence-grid"); grid.innerHTML = "";
     
     let title = "";
-    if (listName === 'mtInfos') title = "Mi-Temps : Infos Sportives";
-    else if (listName === 'mtPubs') title = "Mi-Temps : Pubs & Sponsors";
-    else if (listName === 'finPubs') title = "Fin de Match : Pubs & Sponsors";
-    else if (listName === 'entreeJoueurs') title = "Entrée des Joueurs : Vidéos";
+    let targetSceneForModal = "";
+    
+    if (listName === 'mtInfos') { title = "Mi-Temps : Infos Sportives"; targetSceneForModal = sourceNames.miTempsScene; }
+    else if (listName === 'mtPubs') { title = "Mi-Temps : Pubs & Sponsors"; targetSceneForModal = sourceNames.miTempsScene; }
+    else if (listName === 'finPubs') { title = "Fin de Match : Pubs & Sponsors"; targetSceneForModal = sourceNames.finMatchReplayScene; }
+    else if (listName === 'entreeJoueurs') { title = "Entrée des Joueurs : Vidéos"; targetSceneForModal = sourceNames.entreeScene; }
     
     document.getElementById("sequence-modal-title").innerText = `Sélectionner pour ${title}`;
 
-    availableObsSources.sort().forEach(sourceName => {
+    // CORRECTION SOURCE : On ne montre QUE les sources qui existent dans la scène ciblée (ISOLATION)
+    let sourcesToShow = sceneSourcesMap[targetSceneForModal] || [];
+    
+    sourcesToShow.sort().forEach(sourceName => {
         const btn = document.createElement("button");
         const isVid = obsSourcesDetails[sourceName]?.isVideo || sourceName.toUpperCase().includes('VIDEO');
         btn.innerHTML = `${isVid ? '🎥' : '🖼️'} ${sourceName}`;
@@ -504,6 +523,11 @@ function openSequenceModal(listName) {
         };
         grid.appendChild(btn);
     });
+    
+    if(sourcesToShow.length === 0) {
+        grid.innerHTML = `<div style="font-size:13px; color:#aaa; text-align: center; grid-column: 1/-1;">Aucune source trouvée dans la scène ${targetSceneForModal}.</div>`;
+    }
+    
     document.getElementById("sequence-modal").style.display = "flex";
 }
 
@@ -565,7 +589,7 @@ function openPlayerModal(action, team, penaltyDuration) {
 }
 function promptTimeout() { currentModalAction = 'TIMEOUT'; document.getElementById("modal-title").textContent = "TEMPS MORT DEMANDÉ PAR :"; const grid = document.getElementById("player-grid"); grid.innerHTML = ""; ['domName', 'visName'].forEach(id => { const name = document.getElementById(id).value || (id === 'domName' ? 'Domicile' : 'Visiteur'); const btn = document.createElement("button"); btn.innerHTML = `<b style="font-size:18px;">${name}</b>`; btn.style.padding = "20px"; btn.onclick = () => submitTimeoutAction(name); grid.appendChild(btn); }); document.getElementById("player-modal").style.display = "flex"; }
 function closePlayerModal() { document.getElementById("player-modal").style.display = "none"; }
-function submitPlayerAction(nom, num) { closePlayerModal(); const overlayText = `${currentModalAction} - ${nom} ${num ? `n°${num}` : ""}`.trim(); if (currentModalAction === 'BUT') directChangeScore(currentModalTeam, 1); else if (currentModalAction === 'PEN') { penalties[currentModalTeam].push({ id: Date.now(), timeRemaining: currentModalDuration * 60 }); renderPenalties(); updatePenaltyOBSText(); } triggerOverlay(overlayText); }
+function submitPlayerAction(nom, num) { closePlayerModal(); const overlayText = `${currentModalAction} - ${nom} ${num ? `n°${num}` : ""}`.trim(); if (currentModalAction === 'BUT') directChangeScore(currentModalTeam, 1); else if (currentModalAction === 'PEN') { penalties[currentModalTeam].push({ id: Date.now(), timeRemaining: currentModalDuration * 60, originalDuration: currentModalDuration * 60 }); renderPenalties(); updatePenaltyOBSText(); } triggerOverlay(overlayText); }
 function submitTimeoutAction(teamName) { closePlayerModal(); if (timerInterval) stopTimer(); triggerOverlay(`TEMPS MORT - ${teamName}`); }
 function promptPenalty(team, duration) { openPlayerModal('PEN', team, duration); }
 
@@ -611,6 +635,14 @@ function forceStopReplay(switchBack = true) {
     [...sequences.mtInfos, ...sequences.mtPubs].forEach(item => { setSourceVisibility(item.name, false, sourceNames.miTempsScene); setSourceVisibility(item.name, false, sourceNames.miTempsReplayScene); });
     sequences.finPubs.forEach(item => { setSourceVisibility(item.name, false, sourceNames.finMatchReplayScene); });
 
+    // CORRECTION PANIQUE ENTRÉE JOUEURS : Si l'animation tournait, on l'éteint instantanément !
+    if (isEntreePlaying && currentEntreeSource) {
+        setSourceVisibility(currentEntreeSource, false, sourceNames.entreeScene);
+        isEntreePlaying = false;
+        currentEntreeSource = null;
+        renderEntreeList(); 
+    }
+
     if (switchBack) {
         if (currentLiveScene === sourceNames.replayScene) { setSourceVisibility(sourceNames.replayImageNormal, false, sourceNames.replayScene); switchScene(sourceNames.sceneName); } 
         else if (currentLiveScene === sourceNames.finMatchReplayScene) { switchScene(sourceNames.finMatchScene); } 
@@ -629,6 +661,7 @@ function connectOBS() {
         else if (p.op === 2) { 
             console.log("✅ Connecté à OBS"); 
             updateOBSText(sourceNames.C, obsPeriodStates[currentPeriodIndex]); syncTimerDisplayAndOBS(); updatePenaltyOBSText(); sendReq("GetReplayBufferStatus", {}, "init-replay-status"); 
+            sceneSourcesMap = {}; 
             loadObsSourcesForSequences();
         } 
         else if (p.op === 5) {
@@ -651,14 +684,19 @@ function connectOBS() {
             else if (p.d.requestId.startsWith("getid:::")) { const pts = p.d.requestId.split(":::"); sceneItemIds[pts[1] + ":::" + pts[2]] = p.d.responseData.sceneItemId; sendReq("SetSceneItemEnabled", { sceneName: pts[1], sceneItemId: p.d.responseData.sceneItemId, sceneItemEnabled: pts[3] === "true" }); }
             else if (p.d.requestId.startsWith("get_sources_")) {
                 const sceneName = p.d.requestId.split(":::")[1];
+                if (!sceneSourcesMap[sceneName]) sceneSourcesMap[sceneName] = []; 
+
                 p.d.responseData.sceneItems.forEach(item => { 
                     const isVid = item.sourceName.toUpperCase().includes("VIDEO") || item.sourceKind === "ffmpeg_source" || item.sourceKind === "vlc_source";
                     obsSourcesDetails[item.sourceName] = { isVideo: isVid };
                     if (!availableObsSources.includes(item.sourceName)) availableObsSources.push(item.sourceName);
                     sceneItemIds[sceneName + ":::" + item.sourceName] = item.sceneItemId; 
+                    
+                    if (!sceneSourcesMap[sceneName].includes(item.sourceName)) {
+                        sceneSourcesMap[sceneName].push(item.sourceName);
+                    }
                 });
             }
-            // CALCUL DU FONDU DE SORTIE 750ms POUR LES VIDEOS JOUEURS
             else if (p.d.requestId.startsWith("media_status:::")) {
                 const parts = p.d.requestId.split(":::");
                 const srcName = parts[1];
@@ -670,7 +708,7 @@ function connectOBS() {
                 
                 if (status.mediaDuration > 0) {
                     const remaining = status.mediaDuration - status.mediaCursor;
-                    const timeToFade = remaining - 750; // Anticipation de 750ms
+                    const timeToFade = remaining - 750; 
                     
                     if (timeToFade > 0) {
                         setTimeout(() => {
@@ -829,11 +867,18 @@ function openSpotifyExtraModal() {
 }
 function closeSpotifyExtraModal() { document.getElementById('spotify-extra-modal').style.display = 'none'; }
 
+// CORRECTION SPOTIFY : Rembobinage à zéro forcé avec "position_ms: 0"
 async function playSpotifyUri(uri, contextName) {
     const statusEl = document.getElementById('spotify-status');
     if(!uri) { statusEl.innerText = "❌ Action annulée : Aucune playlist sélectionnée."; setTimeout(() => statusEl.innerText = "", 3000); return; }
-    try { await fetchSpotifyApi('me/player/play', 'PUT', { context_uri: uri }); statusEl.innerText = `🎵 Lecture envoyée : ${contextName}`; setTimeout(() => statusEl.innerText = "", 3000); } 
-    catch (e) { statusEl.innerText = "❌ Erreur 404 : Aucun appareil actif. Ouvrez l'appli Spotify !"; setTimeout(() => statusEl.innerText = "", 5000); }
+    try { 
+        await fetchSpotifyApi('me/player/play', 'PUT', { context_uri: uri, offset: { position: 0 }, position_ms: 0 }); 
+        statusEl.innerText = `🎵 Lecture envoyée : ${contextName}`; 
+        setTimeout(() => statusEl.innerText = "", 3000); 
+    } catch (e) { 
+        statusEl.innerText = "❌ Erreur 404 : Aucun appareil actif. Ouvrez l'appli Spotify !"; 
+        setTimeout(() => statusEl.innerText = "", 5000); 
+    }
 }
 
 async function toggleSpotifyPlayPause() {
@@ -961,7 +1006,14 @@ function displayWebAppTracks(tracks, playlist) {
         const trackImgUrl = track.album?.images?.[2]?.url || 'https://placehold.co/40'; const artists = track.artists.map(a => a.name).join(', ');
         trackItem.innerHTML = `<img src="${trackImgUrl}"><div class="webapp-track-info"><h3 style="color:white; margin:0;" class="${track.uri === currentTrackUri ? 'active-text' : ''}">${track.name}</h3><p>${artists}</p></div>`;
         if(track.is_local) { trackItem.style.cursor = 'not-allowed'; trackItem.title = 'Piste locale non jouable'; }
-        else { trackItem.onclick = async () => { try { await fetchSpotifyApi('me/player/play', 'PUT', { context_uri: playlist.uri, offset: { uri: track.uri } }); } catch(e){} }; }
+        else { 
+            trackItem.onclick = async () => { 
+                try { 
+                    // CORRECTION SPOTIFY : Rembobinage à 0 pour une piste spécifique
+                    await fetchSpotifyApi('me/player/play', 'PUT', { context_uri: playlist.uri, offset: { uri: track.uri }, position_ms: 0 }); 
+                } catch(e){} 
+            }; 
+        }
         container.appendChild(trackItem);
     });
 }
